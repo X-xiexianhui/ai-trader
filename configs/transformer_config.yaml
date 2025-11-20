@@ -1,0 +1,112 @@
+# Transformer模型配置文件
+# 用于时间序列状态表征学习的Transformer模型
+
+# 模型架构参数
+model:
+  # 输入维度
+  ts2vec_dim: 128              # TS2Vec embedding维度
+  manual_dim: 27               # 手工特征维度
+  
+  # Transformer参数
+  d_model: 256                 # 模型维度
+  num_heads: 8                 # 注意力头数
+  num_layers: 6                # 编码器层数
+  d_ff: 1024                   # 前馈网络隐藏层维度
+  max_seq_len: 512             # 最大序列长度
+  dropout: 0.1                 # Dropout率
+  
+  # 辅助任务
+  use_auxiliary: true          # 是否使用辅助任务
+
+# 数据参数
+data:
+  seq_len: 64                  # 序列长度
+  pred_horizon: 1              # 预测时间跨度
+  stride: 1                    # 滑动步长
+  return_threshold: 0.001      # 收益率阈值（用于分类标签）
+  
+  # 数据分割
+  train_ratio: 0.7             # 训练集比例
+  val_ratio: 0.15              # 验证集比例
+  test_ratio: 0.15             # 测试集比例
+
+# 训练参数
+training:
+  # 优化器
+  learning_rate: 0.0001        # 初始学习率
+  weight_decay: 0.01           # 权重衰减（L2正则化）
+  
+  # 学习率调度
+  warmup_steps: 1000           # Warmup步数
+  min_lr: 0.000001             # 最小学习率
+  
+  # 训练设置
+  batch_size: 32               # 批次大小
+  max_epochs: 100              # 最大训练轮数
+  grad_clip: 1.0               # 梯度裁剪阈值
+  
+  # 多任务学习权重
+  regression_weight: 1.0       # 回归任务权重
+  classification_weight: 0.5   # 分类任务权重
+  
+  # 早停
+  patience: 10                 # 早停容忍轮数
+  min_delta: 0.0001            # 最小改进量
+  
+  # 数据加载
+  num_workers: 4               # 数据加载线程数
+  pin_memory: true             # 是否使用pin_memory
+
+# 评估参数
+evaluation:
+  # 评估指标
+  metrics:
+    - mse                      # 均方误差
+    - rmse                     # 均方根误差
+    - mae                      # 平均绝对误差
+    - r2                       # R²分数
+    - direction_accuracy       # 方向准确率
+    - accuracy                 # 分类准确率
+    - precision                # 精确率
+    - recall                   # 召回率
+    - f1                       # F1分数
+    - auc                      # AUC
+  
+  # 可视化
+  visualize_attention: true    # 是否可视化注意力权重
+  attention_layer: -1          # 可视化的层索引（-1表示最后一层）
+
+# 设备配置
+device:
+  use_cuda: true               # 是否使用CUDA
+  cuda_device: 0               # CUDA设备ID
+  mixed_precision: false       # 是否使用混合精度训练
+
+# 保存配置
+checkpoint:
+  save_dir: "models/transformer"  # 模型保存目录
+  save_frequency: 1            # 保存频率（每N个epoch）
+  keep_last_n: 3               # 保留最近N个检查点
+  save_best: true              # 是否保存最佳模型
+
+# 日志配置
+logging:
+  log_dir: "logs/transformer"  # 日志目录
+  log_frequency: 10            # 日志记录频率（每N个batch）
+  tensorboard: true            # 是否使用TensorBoard
+  
+# 实验配置
+experiment:
+  name: "transformer_pretrain" # 实验名称
+  description: "Transformer预训练用于状态表征学习"
+  tags:
+    - transformer
+    - supervised_learning
+    - multi_task
+  
+  # 随机种子
+  seed: 42
+  
+  # 可复现性
+  deterministic: true          # 是否使用确定性算法
+  benchmark: false             # 是否使用cudnn benchmark

@@ -1,0 +1,96 @@
+# TS2Vec模型配置文件
+# Author: AI Trader Team
+# Date: 2025-11-20
+
+# 模型架构参数
+model:
+  input_dim: 27  # 输入特征维度
+  hidden_dim: 64  # 隐藏层维度
+  num_layers: 10  # Dilated CNN层数
+  kernel_size: 3  # 卷积核大小
+  projection_dim: 128  # 投影头输出维度
+  dropout: 0.1  # Dropout率
+
+# 数据参数
+data:
+  window_size: 256  # 滑动窗口大小
+  stride: 1  # 滑动步长
+  batch_size: 32  # 批次大小
+  num_workers: 4  # 数据加载线程数
+  
+  # 数据增强
+  augmentation:
+    temporal_masking:
+      enabled: true
+      mask_ratio: 0.15  # 遮蔽比例
+    magnitude_scaling:
+      enabled: true
+      scale_range: [0.8, 1.2]  # 缩放范围
+    time_shifting:
+      enabled: true
+      max_shift: 10  # 最大平移量
+    time_warping:
+      enabled: true
+      warp_strength: 0.2  # 扭曲强度
+
+# 训练参数
+training:
+  num_epochs: 100  # 训练轮数
+  learning_rate: 0.001  # 初始学习率
+  weight_decay: 0.00001  # 权重衰减
+  
+  # 学习率调度
+  scheduler:
+    warmup_epochs: 5  # Warmup轮数
+    min_lr: 0.000001  # 最小学习率
+  
+  # 早停
+  early_stopping:
+    patience: 10  # 容忍轮数
+    min_delta: 0.0001  # 最小改善量
+  
+  # 梯度裁剪
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0  # 最大梯度范数
+
+# 对比学习参数
+contrastive:
+  temperature: 0.07  # 温度参数
+  hierarchical_weight: 0.5  # 层次对比损失权重
+
+# 评估参数
+evaluation:
+  batch_size: 128  # 评估批次大小
+  
+  # 线性探测
+  linear_probing:
+    test_size: 0.2  # 测试集比例
+    max_iter: 1000  # 最大迭代次数
+  
+  # 聚类
+  clustering:
+    n_clusters: 5  # 聚类数量
+    n_init: 10  # K-Means初始化次数
+
+# 保存参数
+checkpoint:
+  save_dir: "models/ts2vec"  # 保存目录
+  save_frequency: 10  # 保存频率（每N个epoch）
+  keep_best: true  # 保存最佳模型
+  keep_last: true  # 保存最后模型
+
+# 日志参数
+logging:
+  log_dir: "logs/ts2vec"  # 日志目录
+  log_frequency: 10  # 日志频率（每N个batch）
+  tensorboard: true  # 使用TensorBoard
+
+# 设备参数
+device:
+  use_cuda: true  # 使用CUDA
+  gpu_id: 0  # GPU ID
+  mixed_precision: false  # 混合精度训练
+
+# 随机种子
+seed: 42
