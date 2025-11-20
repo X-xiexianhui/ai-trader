@@ -106,6 +106,7 @@ graph TB
 #### 2.3.1 核心框架
 - **深度学习框架**：PyTorch 2.0+
 - **强化学习库**：Stable-Baselines3 或 CleanRL
+- **GPU加速**: 检查设备显卡，支持CUDA和ROMc
 - **数据处理**：Pandas、NumPy
 - **技术指标**：TA-Lib 或 Pandas-TA
 
