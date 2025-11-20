@@ -41,40 +41,71 @@ class TrainingPipeline:
         
         logger.info("Training pipeline initialized")
     
-    def prepare_data(self):
-        """准备数据"""
+    def prepare_data(self, data_path: str = None):
+        """
+        准备数据
+        
+        Args:
+            data_path: OHLCV数据文件路径（parquet格式）
+        """
         logger.info("=" * 60)
         logger.info("Step 1: Preparing data...")
         logger.info("=" * 60)
         
-        from src.data.downloader import YahooFinanceDownloader
         from src.data.cleaner import DataCleaningPipeline
+        import pandas as pd
         
-        # 下载数据
-        downloader = YahooFinanceDownloader()
-        symbols = self.config.get('data', {}).get('symbols', ['ES=F'])
-        
-        for symbol in symbols:
-            logger.info(f"Downloading data for {symbol}...")
-            data = downloader.download(
-                symbol=symbol,
-                start_date=self.config.get('data', {}).get('start_date', '2020-01-01'),
-                end_date=self.config.get('data', {}).get('end_date', '2023-12-31'),
-                interval='5m'
-            )
+        if data_path is None:
+            # 如果没有提供数据路径，查找已有数据
+            data_dir = self.project_root / "data" / "raw"
+            data_files = list(data_dir.glob("*.parquet")) + list(data_dir.glob("*.csv"))
+            
+            if not data_files:
+                logger.error("No data files found in data/raw/")
+                logger.error("Please provide OHLCV data file path or place data in data/raw/")
+                return False
+            
+            logger.info(f"Found {len(data_files)} data file(s)")
+            
+            for data_file in data_files:
+                logger.info(f"Processing {data_file.name}...")
+                
+                # 加载数据
+                if data_file.suffix == '.parquet':
+                    data = pd.read_parquet(data_file)
+                else:
+                    data = pd.read_csv(data_file, index_col=0, parse_dates=True)
+                
+                # 清洗数据
+                cleaner = DataCleaningPipeline()
+                cleaned_data = cleaner.clean(data)
+                
+                # 保存
+                output_path = self.project_root / "data" / "processed" / f"{data_file.stem}_cleaned.parquet"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                cleaned_data.to_parquet(output_path)
+                logger.info(f"Saved cleaned data to {output_path}")
+        else:
+            # 使用提供的数据路径
+            logger.info(f"Loading data from {data_path}...")
+            
+            if data_path.endswith('.parquet'):
+                data = pd.read_parquet(data_path)
+            else:
+                data = pd.read_csv(data_path, index_col=0, parse_dates=True)
             
             # 清洗数据
-            logger.info(f"Cleaning data for {symbol}...")
             cleaner = DataCleaningPipeline()
             cleaned_data = cleaner.clean(data)
             
             # 保存
-            output_path = self.project_root / "data" / "processed" / f"{symbol}_cleaned.parquet"
+            output_path = self.project_root / "data" / "processed" / "cleaned_data.parquet"
             output_path.parent.mkdir(parents=True, exist_ok=True)
             cleaned_data.to_parquet(output_path)
             logger.info(f"Saved cleaned data to {output_path}")
         
         logger.info("✓ Data preparation complete")
+        return True
     
     def extract_features(self):
         """提取特征"""
@@ -233,15 +264,21 @@ class TrainingPipeline:
         logger.info(f"✓ PPO policy saved to {model_path}")
         return True
     
-    def run_full_pipeline(self):
-        """运行完整训练流程"""
+    def run_full_pipeline(self, data_path: str = None):
+        """
+        运行完整训练流程
+        
+        Args:
+            data_path: OHLCV数据文件路径
+        """
         logger.info("=" * 80)
         logger.info("Starting full training pipeline...")
         logger.info("=" * 80)
         
         try:
             # 1. 准备数据
-            self.prepare_data()
+            if not self.prepare_data(data_path):
+                return False
             
             # 2. 提取特征
             self.extract_features()
@@ -313,6 +350,13 @@ Examples:
         help="Which model to train"
     )
     
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="Path to OHLCV data file (parquet or csv format)"
+    )
+    
     args = parser.parse_args()
     
     # 创建训练流水线
@@ -320,9 +364,10 @@ Examples:
     
     # 根据参数执行训练
     if args.model == "all":
-        success = pipeline.run_full_pipeline()
+        success = pipeline.run_full_pipeline(data_path=args.data)
     elif args.model == "ts2vec":
-        pipeline.prepare_data()
+        if not pipeline.prepare_data(data_path=args.data):
+            sys.exit(1)
         pipeline.extract_features()
         success = pipeline.train_ts2vec()
     elif args.model == "transformer":

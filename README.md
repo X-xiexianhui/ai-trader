@@ -99,19 +99,47 @@ vim configs/my_config.yaml
 
 ### 基本使用
 
-#### 方式1: 一键训练（推荐）
+#### 步骤1: 下载数据
+
+首先使用独立的数据下载脚本获取OHLCV数据：
 
 ```bash
-# 运行完整训练流程（数据采集 → 特征提取 → 模型训练）
-python train.py
+# 下载ES期货数据（最近30天）
+python download_data.py --symbol ES=F --days 30
+
+# 下载指定日期范围的数据
+python download_data.py --symbol ES=F --start 2023-01-01 --end 2023-12-31
+
+# 下载1分钟数据
+python download_data.py --symbol ES=F --days 7 --interval 1m
+
+# 下载多个品种
+python download_data.py --symbol AAPL MSFT GOOGL --days 90
+
+# 自定义输出目录
+python download_data.py --symbol ES=F --days 30 --output data/my_data
+```
+
+数据将保存为parquet格式，文件名示例：`ES_F_2023-01-01_2023-12-31_20231220.parquet`
+
+#### 步骤2: 训练模型
+
+使用下载的数据训练模型：
+
+```bash
+# 使用指定数据文件训练
+python train.py --data data/raw/ES_F_2023-01-01_2023-12-31_20231220.parquet
 
 # 使用自定义配置
-python train.py --config configs/my_config.yaml
+python train.py --data data/raw/ES_F_*.parquet --config configs/my_config.yaml
 
 # 只训练特定模型
-python train.py --model ts2vec      # 只训练TS2Vec
-python train.py --model transformer # 只训练Transformer
-python train.py --model ppo         # 只训练PPO
+python train.py --data data/raw/ES_F_*.parquet --model ts2vec      # 只训练TS2Vec
+python train.py --data data/raw/ES_F_*.parquet --model transformer # 只训练Transformer
+python train.py --data data/raw/ES_F_*.parquet --model ppo         # 只训练PPO
+
+# 如果不指定--data参数，会自动查找data/raw/目录下的数据文件
+python train.py
 ```
 
 训练完成后，模型将保存在：
@@ -119,21 +147,28 @@ python train.py --model ppo         # 只训练PPO
 - `models/transformer/best_model.pt`
 - `models/ppo/best_model.pt`
 
-#### 方式2: 运行已训练模型
+#### 步骤3: 运行模型
+
+使用训练好的模型进行预测：
 
 ```bash
-# 单次预测
-python run.py --mode once --symbol ES=F
+# 单次预测（需要提供数据文件）
+python run.py --mode once --data data/raw/ES_F_latest.parquet
 
-# 持续运行（每5分钟预测一次）
-python run.py --mode continuous --symbol ES=F --interval 300
+# 持续运行（每5分钟预测一次，需要外部更新数据文件）
+python run.py --mode continuous --data data/raw/ES_F_latest.parquet --interval 300
 
-# 回测模式
-python run.py --mode backtest --symbol ES=F --start 2023-01-01 --end 2023-12-31
+# 回测模式（使用历史数据）
+python run.py --mode backtest --data data/raw/ES_F_2023-01-01_2023-12-31.parquet
 
 # 使用CPU运行
-python run.py --device cpu --mode once
+python run.py --device cpu --mode once --data data/raw/ES_F_latest.parquet
 ```
+
+**注意**:
+- `--data` 参数是必需的，需要提供OHLCV数据文件路径
+- 持续运行模式下，脚本会定期重新加载数据文件，需要外部程序更新数据
+- 支持parquet和CSV格式的数据文件
 
 **输出示例**:
 ```

@@ -73,30 +73,24 @@ class TradingBot:
         
         logger.info("Trading bot initialized successfully")
     
-    def get_latest_data(self, symbol: str = "ES=F", lookback_days: int = 30) -> pd.DataFrame:
+    def load_data(self, data_path: str) -> pd.DataFrame:
         """
-        获取最新市场数据
+        加载OHLCV数据
         
         Args:
-            symbol: 交易品种
-            lookback_days: 回溯天数
+            data_path: 数据文件路径
             
         Returns:
             data: 市场数据
         """
-        logger.info(f"Fetching latest data for {symbol}...")
+        logger.info(f"Loading data from {data_path}...")
         
-        from datetime import datetime, timedelta
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=lookback_days)
+        if data_path.endswith('.parquet'):
+            data = pd.read_parquet(data_path)
+        else:
+            data = pd.read_csv(data_path, index_col=0, parse_dates=True)
         
-        data = self.downloader.download(
-            symbol=symbol,
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
-            interval="5m"
-        )
-        
+        logger.info(f"Data loaded: {len(data)} bars")
         return data
     
     def prepare_input(self, data: pd.DataFrame) -> tuple:
@@ -121,19 +115,18 @@ class TradingBot:
         
         return market_data, features
     
-    def predict_once(self, symbol: str = "ES=F") -> dict:
+    def predict_once(self, data: pd.DataFrame, symbol: str = "Unknown") -> dict:
         """
         执行一次预测
         
         Args:
-            symbol: 交易品种
+            data: OHLCV数据
+            symbol: 交易品种名称
             
         Returns:
             signal: 交易信号
         """
         try:
-            # 获取数据
-            data = self.get_latest_data(symbol)
             
             # 准备输入
             market_data, features = self.prepare_input(data)
@@ -168,20 +161,23 @@ class TradingBot:
     
     def run_continuous(
         self,
-        symbol: str = "ES=F",
+        data_path: str,
+        symbol: str = "Unknown",
         interval_seconds: int = 300,
         max_iterations: int = None
     ):
         """
-        持续运行模式
+        持续运行模式（需要定期更新数据文件）
         
         Args:
-            symbol: 交易品种
+            data_path: OHLCV数据文件路径
+            symbol: 交易品种名称
             interval_seconds: 预测间隔（秒）
             max_iterations: 最大迭代次数（None表示无限）
         """
         logger.info("=" * 80)
         logger.info(f"Starting continuous trading mode for {symbol}")
+        logger.info(f"Data source: {data_path}")
         logger.info(f"Prediction interval: {interval_seconds} seconds")
         logger.info("=" * 80)
         
@@ -191,9 +187,13 @@ class TradingBot:
             while True:
                 iteration += 1
                 
+                # 重新加载数据（假设数据文件会被外部更新）
+                logger.info(f"\n[Iteration {iteration}] Loading latest data...")
+                data = self.load_data(data_path)
+                
                 # 执行预测
-                logger.info(f"\n[Iteration {iteration}] Generating signal...")
-                signal = self.predict_once(symbol)
+                logger.info(f"Generating signal...")
+                signal = self.predict_once(data, symbol)
                 
                 # 显示信号
                 if "error" not in signal:
@@ -241,33 +241,23 @@ class TradingBot:
     
     def run_backtest(
         self,
-        symbol: str = "ES=F",
-        start_date: str = "2023-01-01",
-        end_date: str = "2023-12-31"
+        data_path: str,
+        symbol: str = "Unknown"
     ):
         """
         回测模式
         
         Args:
-            symbol: 交易品种
-            start_date: 开始日期
-            end_date: 结束日期
+            data_path: OHLCV数据文件路径
+            symbol: 交易品种名称
         """
         logger.info("=" * 80)
         logger.info(f"Starting backtest mode for {symbol}")
-        logger.info(f"Period: {start_date} to {end_date}")
+        logger.info(f"Data source: {data_path}")
         logger.info("=" * 80)
         
-        # 获取历史数据
-        logger.info("Downloading historical data...")
-        data = self.downloader.download(
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            interval="5m"
-        )
-        
-        logger.info(f"Data loaded: {len(data)} bars")
+        # 加载历史数据
+        data = self.load_data(data_path)
         
         # 滚动预测
         signals = []
@@ -307,16 +297,16 @@ def main():
         epilog="""
 Examples:
   # 单次预测
-  python run.py --mode once --symbol ES=F
+  python run.py --mode once --data data/raw/ES_F.parquet --symbol ES=F
   
-  # 持续运行（每5分钟预测一次）
-  python run.py --mode continuous --symbol ES=F --interval 300
+  # 持续运行（每5分钟预测一次，需要外部更新数据文件）
+  python run.py --mode continuous --data data/raw/ES_F.parquet --symbol ES=F --interval 300
   
   # 回测模式
-  python run.py --mode backtest --symbol ES=F --start 2023-01-01 --end 2023-12-31
+  python run.py --mode backtest --data data/raw/ES_F_historical.parquet --symbol ES=F
   
   # 使用CPU运行
-  python run.py --device cpu
+  python run.py --device cpu --mode once --data data/raw/ES_F.parquet
         """
     )
     
