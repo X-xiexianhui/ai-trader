@@ -108,7 +108,7 @@ graph TB
 - **强化学习库**：Stable-Baselines3 或 CleanRL
 - **GPU加速**: 检查设备显卡，支持CUDA和ROMc
 - **数据处理**：Pandas、NumPy
-- **技术指标**：TA-Lib 或 Pandas-TA
+- **技术指标**：Pandas-TA
 
 #### 2.3.2 回测框架
 - **推荐方案1**：Backtrader（成熟稳定）
