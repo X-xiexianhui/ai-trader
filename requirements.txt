@@ -1,0 +1,45 @@
+# 深度学习框架
+torch>=2.0.0
+torchvision>=0.15.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+pandas-ta>=0.3.14b
+
+# 科学计算
+scipy>=1.10.0
+scikit-learn>=1.3.0
+
+# 强化学习
+stable-baselines3>=2.0.0
+gymnasium>=0.28.0
+
+# 回测框架
+backtrader>=1.9.76
+
+# 数据源
+yfinance>=0.2.0
+
+# 数据存储
+pyarrow>=12.0.0
+tables>=3.8.0
+
+# 工具库
+joblib>=1.3.0
+tqdm>=4.65.0
+pyyaml>=6.0
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+
+# 日志和监控
+tensorboard>=2.13.0
+wandb>=0.15.0
+
+# 开发工具
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0

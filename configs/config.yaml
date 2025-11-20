@@ -1,0 +1,156 @@
+# AI交易系统配置文件
+
+# 数据配置
+data:
+  # 数据路径
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  
+  # 数据源
+  symbols: ["ES=F", "NQ=F"]  # 标普500期货, 纳斯达克期货
+  interval: "5m"
+  start_date: "2020-01-01"
+  end_date: "2024-12-31"
+  
+  # 数据清洗
+  max_consecutive_missing: 5
+  outlier_sigma: 3.0
+  target_timezone: "UTC"
+  
+  # 特征计算
+  feature_groups:
+    - price_return
+    - volatility
+    - technical
+    - volume
+    - candlestick
+    - time
+
+# TS2Vec配置
+ts2vec:
+  # 模型结构
+  input_dim: 4  # OHLC
+  hidden_dim: 256
+  num_layers: 10
+  dilation_rates: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+  kernel_size: 3
+  
+  # 训练配置
+  window_length: 256
+  batch_size: 64
+  num_epochs: 100
+  learning_rate: 0.001
+  temperature: 0.1
+  
+  # 数据增强
+  masking_ratio: 0.2
+  time_warp_ratio: 0.05
+  magnitude_scale_range: [0.9, 1.1]
+  
+  # 早停
+  patience: 10
+  min_delta: 0.001
+
+# Transformer配置
+transformer:
+  # 模型结构
+  input_dim: 155  # 128 (TS2Vec) + 27 (手工特征)
+  d_model: 256
+  nhead: 8
+  num_layers: 6
+  dim_feedforward: 1024
+  dropout: 0.1
+  
+  # 序列配置
+  sequence_length: 64
+  
+  # 训练配置
+  batch_size: 32
+  num_epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip: 0.5
+  
+  # 辅助任务权重
+  regression_weight: 0.1
+  classification_weight: 0.05
+  
+  # 早停
+  patience: 10
+
+# PPO配置
+ppo:
+  # 环境配置
+  state_dim: 263  # 256 (Transformer) + 7 (持仓+风险)
+  action_space:
+    direction: 3  # 平仓/做多/做空
+    position_size: [0, 1]
+    stop_loss: [0.001, 0.05]
+    take_profit: [0.002, 0.10]
+  
+  # 网络结构
+  hidden_dims: [512, 256]
+  dropout: 0.1
+  
+  # 训练配置
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  
+  # 损失权重
+  value_coef: 0.5
+  entropy_coef: 0.01
+  
+  # 奖励函数
+  reward_weights:
+    profit: 1.0
+    drawdown_penalty: 0.5
+    holding_time_penalty: 0.1
+    leverage_penalty: 0.3
+    sharpe_bonus: 0.2
+
+# 回测配置
+backtest:
+  initial_capital: 100000
+  commission: 0.0002  # 0.02%
+  slippage: 0.0001    # 0.01%
+  leverage: 1.0
+  
+  # Walk-forward验证
+  train_window_months: 24
+  val_window_months: 6
+  test_window_months: 6
+  step_months: 3
+
+# 评估配置
+evaluation:
+  # 性能指标
+  metrics:
+    - cumulative_return
+    - annual_return
+    - sharpe_ratio
+    - sortino_ratio
+    - calmar_ratio
+    - max_drawdown
+    - win_rate
+    - profit_factor
+  
+  # 稳定性测试
+  num_seeds: 10
+  cv_threshold: 0.3
+
+# 日志配置
+logging:
+  level: "INFO"
+  log_dir: "logs"
+  tensorboard_dir: "logs/tensorboard"
+  
+# 模型保存
+checkpoints:
+  save_dir: "models/checkpoints"
+  save_freq: 10  # 每10个epoch保存一次
+  keep_best: 3   # 保留最好的3个模型
