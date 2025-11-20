@@ -1,0 +1,307 @@
+# AI交易系统基础配置文件
+# Base Configuration for AI Trading System
+
+# 项目信息
+project:
+  name: "ai-trader"
+  version: "1.0.0"
+  description: "基于TS2Vec-Transformer-PPO的智能交易系统"
+  author: "AI Trader Team"
+
+# 环境配置
+environment:
+  # 运行模式: development, production, testing
+  mode: "development"
+  
+  # 随机种子
+  seed: 42
+  
+  # 设备配置
+  device:
+    # 设备类型: auto, cuda, rocm, cpu
+    type: "auto"
+    
+    # GPU设备ID (仅当type为cuda或rocm时有效)
+    gpu_id: 0
+    
+    # 是否启用混合精度训练
+    mixed_precision: false
+    
+    # GPU内存限制 (GB, 0表示不限制)
+    memory_limit: 0
+    
+    # 是否启用多GPU并行
+    multi_gpu: false
+    
+    # 多GPU策略: dp (DataParallel), ddp (DistributedDataParallel)
+    multi_gpu_strategy: "ddp"
+
+# 数据配置
+data:
+  # 数据根目录
+  root_dir: "./data"
+  
+  # 原始数据目录
+  raw_dir: "./data/raw"
+  
+  # 处理后数据目录
+  processed_dir: "./data/processed"
+  
+  # 缓存目录
+  cache_dir: "./data/cache"
+  
+  # 数据频率 (分钟)
+  frequency: 5
+  
+  # 时区
+  timezone: "UTC"
+  
+  # 数据时间范围
+  date_range:
+    start: "2020-01-01"
+    end: "2024-12-31"
+  
+  # 训练/验证/测试集划分
+  split:
+    train: 0.7
+    validation: 0.15
+    test: 0.15
+  
+  # 是否使用缓存
+  use_cache: true
+  
+  # 缓存过期时间 (小时)
+  cache_expiry: 24
+
+# 特征工程配置
+features:
+  # 特征维度
+  dimension: 27
+  
+  # 归一化方法: standard, robust, minmax
+  normalization:
+    method: "standard"
+    
+    # 是否保存scaler
+    save_scaler: true
+    
+    # scaler保存目录
+    scaler_dir: "./scalers"
+  
+  # 特征组
+  groups:
+    price: ["ret_1", "ret_5", "ret_20", "price_slope_20", "C_div_MA20"]
+    volatility: ["ATR14_norm", "vol_20", "range_20_norm", "BB_width_norm", "parkinson_vol"]
+    technical: ["EMA20", "stoch", "MACD", "VWAP"]
+    volume: ["volume", "volume_zscore", "volume_change_1", "OBV_slope_20"]
+    candlestick: ["pos_in_range_20", "dist_to_HH20_norm", "dist_to_LL20_norm", "body_ratio", "upper_shadow_ratio", "lower_shadow_ratio", "FVG"]
+    time: ["sin_tod", "cos_tod"]
+
+# 模型配置
+models:
+  # 模型保存目录
+  save_dir: "./models"
+  
+  # 检查点保存目录
+  checkpoint_dir: "./models/checkpoints"
+  
+  # 是否保存最佳模型
+  save_best_only: true
+  
+  # 监控指标
+  monitor: "val_loss"
+  
+  # 监控模式: min, max
+  monitor_mode: "min"
+
+# 训练配置
+training:
+  # 批次大小
+  batch_size: 32
+  
+  # 训练轮数
+  epochs: 100
+  
+  # 学习率
+  learning_rate: 0.001
+  
+  # 优化器: adam, adamw, sgd
+  optimizer: "adamw"
+  
+  # 权重衰减
+  weight_decay: 0.01
+  
+  # 梯度裁剪
+  gradient_clip:
+    enabled: true
+    max_norm: 0.5
+  
+  # 学习率调度
+  lr_scheduler:
+    enabled: true
+    type: "cosine"  # cosine, step, exponential
+    warmup_epochs: 5
+  
+  # 早停
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  
+  # 验证频率 (每N个epoch)
+  validation_frequency: 1
+  
+  # 日志记录频率 (每N个batch)
+  log_frequency: 10
+
+# 评估配置
+evaluation:
+  # 评估指标
+  metrics:
+    - "sharpe_ratio"
+    - "cagr"
+    - "max_drawdown"
+    - "win_rate"
+    - "profit_factor"
+  
+  # Walk-Forward验证
+  walk_forward:
+    enabled: true
+    train_months: 24
+    validation_months: 6
+    test_months: 6
+  
+  # 基准策略
+  benchmarks:
+    - "buy_and_hold"
+    - "ma_crossover"
+    - "momentum"
+
+# 回测配置
+backtest:
+  # 初始资金
+  initial_capital: 100000
+  
+  # 手续费率
+  commission: 0.001
+  
+  # 滑点 (百分比)
+  slippage: 0.0005
+  
+  # 最大杠杆
+  max_leverage: 1.0
+  
+  # 风险管理
+  risk_management:
+    # 单笔最大仓位 (百分比)
+    max_position_size: 0.2
+    
+    # 最大回撤限制 (百分比)
+    max_drawdown_limit: 0.2
+    
+    # 止损 (百分比)
+    stop_loss: 0.05
+    
+    # 止盈 (百分比)
+    take_profit: 0.15
+
+# 日志配置
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # 日志目录
+  log_dir: "./logs"
+  
+  # 日志文件名格式
+  filename_format: "{name}_{date}.log"
+  
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # 日期格式
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
+  # 是否输出到控制台
+  console: true
+  
+  # 是否输出到文件
+  file: true
+  
+  # 日志轮转
+  rotation:
+    enabled: true
+    max_bytes: 10485760  # 10MB
+    backup_count: 5
+
+# API配置
+api:
+  # 主机
+  host: "0.0.0.0"
+  
+  # 端口
+  port: 8000
+  
+  # 是否启用调试模式
+  debug: false
+  
+  # 是否重载
+  reload: false
+  
+  # 工作进程数
+  workers: 1
+  
+  # 超时时间 (秒)
+  timeout: 60
+  
+  # CORS配置
+  cors:
+    enabled: true
+    allow_origins: ["*"]
+    allow_methods: ["*"]
+    allow_headers: ["*"]
+
+# 监控配置
+monitoring:
+  # 是否启用
+  enabled: true
+  
+  # 监控间隔 (秒)
+  interval: 60
+  
+  # 监控指标
+  metrics:
+    - "cpu_usage"
+    - "memory_usage"
+    - "gpu_usage"
+    - "disk_usage"
+  
+  # 告警配置
+  alerts:
+    enabled: true
+    
+    # CPU使用率阈值 (百分比)
+    cpu_threshold: 90
+    
+    # 内存使用率阈值 (百分比)
+    memory_threshold: 90
+    
+    # GPU使用率阈值 (百分比)
+    gpu_threshold: 95
+    
+    # 磁盘使用率阈值 (百分比)
+    disk_threshold: 90
+
+# 其他配置
+misc:
+  # 是否启用进度条
+  progress_bar: true
+  
+  # 是否启用彩色输出
+  color_output: true
+  
+  # 线程数
+  num_threads: 4
+  
+  # 是否启用性能分析
+  profiling: false

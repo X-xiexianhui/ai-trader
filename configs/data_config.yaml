@@ -1,0 +1,307 @@
+# 数据采集配置文件
+# Data Collection Configuration
+
+# 数据源配置
+data_sources:
+  # Yahoo Finance配置
+  yahoo_finance:
+    enabled: true
+    # API配置
+    api:
+      timeout: 30  # 请求超时时间(秒)
+      max_retries: 3  # 最大重试次数
+      retry_delay: 5  # 重试延迟(秒)
+    
+    # 速率限制
+    rate_limit:
+      requests_per_minute: 60
+      requests_per_hour: 2000
+
+# 支持的期货品种列表
+symbols:
+  # 主要期货品种
+  futures:
+    # 能源类
+    energy:
+      - symbol: "CL=F"  # 原油期货
+        name: "Crude Oil"
+        exchange: "NYMEX"
+        contract_size: 1000
+        tick_size: 0.01
+      - symbol: "NG=F"  # 天然气期货
+        name: "Natural Gas"
+        exchange: "NYMEX"
+        contract_size: 10000
+        tick_size: 0.001
+    
+    # 金属类
+    metals:
+      - symbol: "GC=F"  # 黄金期货
+        name: "Gold"
+        exchange: "COMEX"
+        contract_size: 100
+        tick_size: 0.10
+      - symbol: "SI=F"  # 白银期货
+        name: "Silver"
+        exchange: "COMEX"
+        contract_size: 5000
+        tick_size: 0.005
+      - symbol: "HG=F"  # 铜期货
+        name: "Copper"
+        exchange: "COMEX"
+        contract_size: 25000
+        tick_size: 0.0005
+    
+    # 农产品类
+    agriculture:
+      - symbol: "ZC=F"  # 玉米期货
+        name: "Corn"
+        exchange: "CBOT"
+        contract_size: 5000
+        tick_size: 0.25
+      - symbol: "ZS=F"  # 大豆期货
+        name: "Soybeans"
+        exchange: "CBOT"
+        contract_size: 5000
+        tick_size: 0.25
+      - symbol: "ZW=F"  # 小麦期货
+        name: "Wheat"
+        exchange: "CBOT"
+        contract_size: 5000
+        tick_size: 0.25
+    
+    # 指数类
+    indices:
+      - symbol: "ES=F"  # E-mini S&P 500期货
+        name: "E-mini S&P 500"
+        exchange: "CME"
+        contract_size: 50
+        tick_size: 0.25
+      - symbol: "NQ=F"  # E-mini Nasdaq 100期货
+        name: "E-mini Nasdaq 100"
+        exchange: "CME"
+        contract_size: 20
+        tick_size: 0.25
+      - symbol: "YM=F"  # E-mini Dow Jones期货
+        name: "E-mini Dow Jones"
+        exchange: "CBOT"
+        contract_size: 5
+        tick_size: 1.0
+
+  # 股票指数ETF (作为补充数据源)
+  etfs:
+    - symbol: "SPY"  # SPDR S&P 500 ETF
+      name: "S&P 500 ETF"
+    - symbol: "QQQ"  # Invesco QQQ Trust
+      name: "Nasdaq 100 ETF"
+    - symbol: "DIA"  # SPDR Dow Jones Industrial Average ETF
+      name: "Dow Jones ETF"
+    - symbol: "GLD"  # SPDR Gold Trust
+      name: "Gold ETF"
+    - symbol: "USO"  # United States Oil Fund
+      name: "Oil ETF"
+
+# 数据时间范围配置
+time_range:
+  # 默认时间范围
+  default:
+    start_date: "2020-01-01"  # 开始日期
+    end_date: null  # 结束日期(null表示当前日期)
+  
+  # 训练集时间范围
+  train:
+    start_date: "2020-01-01"
+    end_date: "2023-06-30"
+    duration_months: 42  # 42个月
+  
+  # 验证集时间范围
+  validation:
+    start_date: "2023-07-01"
+    end_date: "2023-12-31"
+    duration_months: 6  # 6个月
+  
+  # 测试集时间范围
+  test:
+    start_date: "2024-01-01"
+    end_date: "2024-06-30"
+    duration_months: 6  # 6个月
+  
+  # Walk-Forward验证窗口
+  walk_forward:
+    train_window_months: 24  # 训练窗口24个月
+    validation_window_months: 6  # 验证窗口6个月
+    test_window_months: 6  # 测试窗口6个月
+    step_months: 3  # 滚动步长3个月
+
+# 数据频率配置
+frequency:
+  # 主要使用的频率
+  primary: "5min"  # 5分钟K线
+  
+  # 支持的频率列表
+  supported:
+    - "1min"   # 1分钟
+    - "5min"   # 5分钟
+    - "15min"  # 15分钟
+    - "30min"  # 30分钟
+    - "1h"     # 1小时
+    - "1d"     # 1天
+  
+  # 频率映射(Yahoo Finance格式)
+  yahoo_mapping:
+    "1min": "1m"
+    "5min": "5m"
+    "15min": "15m"
+    "30min": "30m"
+    "1h": "1h"
+    "1d": "1d"
+
+# 交易时段配置
+trading_hours:
+  # 美国期货市场交易时间(美东时间)
+  us_futures:
+    # 常规交易时段
+    regular:
+      start: "09:30"
+      end: "16:00"
+    
+    # 电子盘交易时段
+    electronic:
+      start: "18:00"  # 前一天
+      end: "17:00"    # 当天
+    
+    # 是否包含盘前盘后
+    include_extended: true
+  
+  # 时区设置
+  timezone:
+    market: "America/New_York"  # 市场时区
+    data: "UTC"  # 数据存储时区
+
+# 数据质量配置
+quality:
+  # 缺失值处理
+  missing_values:
+    max_missing_ratio: 0.01  # 最大缺失比例1%
+    max_consecutive_missing: 5  # 最大连续缺失K线数
+  
+  # 异常值检测
+  outliers:
+    # 价格跳变检测
+    price_jump:
+      threshold_sigma: 5  # 5倍标准差
+    
+    # 成交量异常检测
+    volume_spike:
+      threshold_multiplier: 10  # 10倍移动平均
+      ma_window: 20  # 移动平均窗口
+  
+  # OHLC一致性检查
+  ohlc_consistency:
+    enabled: true
+    auto_fix: true  # 自动修正不一致数据
+
+# 数据缓存配置
+cache:
+  # 缓存目录
+  directory: "data/cache"
+  
+  # 缓存格式
+  format: "parquet"  # parquet, csv, pickle
+  
+  # 缓存策略
+  strategy:
+    enabled: true
+    compression: "snappy"  # 压缩算法
+    
+  # 缓存过期时间
+  expiry:
+    intraday: 3600  # 日内数据1小时过期(秒)
+    daily: 86400  # 日线数据24小时过期(秒)
+  
+  # 增量更新
+  incremental_update:
+    enabled: true
+    check_interval: 3600  # 检查间隔1小时(秒)
+
+# 数据版本控制
+versioning:
+  enabled: true
+  # 版本信息存储
+  metadata_file: "data/cache/versions.json"
+  # 保留历史版本数
+  keep_versions: 5
+
+# 下载配置
+download:
+  # 批量下载
+  batch:
+    enabled: true
+    batch_size: 5  # 每批下载品种数
+    delay_between_batches: 2  # 批次间延迟(秒)
+  
+  # 并发下载
+  concurrent:
+    enabled: false  # 暂不启用并发
+    max_workers: 3
+  
+  # 断点续传
+  resume:
+    enabled: true
+    checkpoint_file: "data/cache/download_checkpoint.json"
+
+# 数据验证配置
+validation:
+  # 启用验证
+  enabled: true
+  
+  # 验证规则
+  rules:
+    - name: "时间连续性"
+      type: "time_continuity"
+      enabled: true
+    
+    - name: "OHLC关系"
+      type: "ohlc_relationship"
+      enabled: true
+    
+    - name: "成交量非负"
+      type: "volume_positive"
+      enabled: true
+    
+    - name: "价格范围"
+      type: "price_range"
+      enabled: true
+      params:
+        min_price: 0.01
+        max_price: 1000000
+  
+  # 验证报告
+  report:
+    enabled: true
+    output_dir: "logs/data_validation"
+    format: "json"  # json, html, txt
+
+# 日志配置
+logging:
+  # 数据采集日志级别
+  level: "INFO"
+  
+  # 日志文件
+  file: "logs/data_collection.log"
+  
+  # 详细模式
+  verbose: false
+
+# 性能配置
+performance:
+  # 内存限制
+  memory_limit_mb: 4096  # 4GB
+  
+  # 数据块大小
+  chunk_size: 10000  # 每次处理的行数
+  
+  # 使用多进程
+  multiprocessing:
+    enabled: false
+    num_processes: 4
