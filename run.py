@@ -242,7 +242,9 @@ class TradingBot:
     def run_backtest(
         self,
         data_path: str,
-        symbol: str = "Unknown"
+        symbol: str = "Unknown",
+        start_date: str = None,
+        end_date: str = None
     ):
         """
         回测模式
@@ -362,6 +364,13 @@ Examples:
     )
     
     parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="Path to OHLCV data file"
+    )
+    
+    parser.add_argument(
         "--no-monitoring",
         action="store_true",
         help="Disable monitoring"
@@ -378,7 +387,13 @@ Examples:
     
     # 根据模式运行
     if args.mode == "once":
-        signal = bot.predict_once(symbol=args.symbol)
+        # 需要先加载数据
+        data_path = getattr(args, 'data', None)
+        if not data_path:
+            print("Error: --data argument is required for 'once' mode")
+            sys.exit(1)
+        data = bot.load_data(data_path)
+        signal = bot.predict_once(data, symbol=args.symbol)
         
         if "error" not in signal:
             print("\n" + "=" * 60)
@@ -399,14 +414,24 @@ Examples:
             sys.exit(1)
     
     elif args.mode == "continuous":
+        data_path = getattr(args, 'data', None)
+        if not data_path:
+            print("Error: --data argument is required for 'continuous' mode")
+            sys.exit(1)
         bot.run_continuous(
+            data_path=data_path,
             symbol=args.symbol,
             interval_seconds=args.interval,
             max_iterations=args.max_iterations
         )
     
     elif args.mode == "backtest":
+        data_path = getattr(args, 'data', None)
+        if not data_path:
+            print("Error: --data argument is required for 'backtest' mode")
+            sys.exit(1)
         bot.run_backtest(
+            data_path=data_path,
             symbol=args.symbol,
             start_date=args.start,
             end_date=args.end
