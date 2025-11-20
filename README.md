@@ -99,21 +99,76 @@ vim configs/my_config.yaml
 
 ### 基本使用
 
-#### 1. 数据采集
+#### 方式1: 一键训练（推荐）
+
+```bash
+# 运行完整训练流程（数据采集 → 特征提取 → 模型训练）
+python train.py
+
+# 使用自定义配置
+python train.py --config configs/my_config.yaml
+
+# 只训练特定模型
+python train.py --model ts2vec      # 只训练TS2Vec
+python train.py --model transformer # 只训练Transformer
+python train.py --model ppo         # 只训练PPO
+```
+
+训练完成后，模型将保存在：
+- `models/ts2vec/best_model.pt`
+- `models/transformer/best_model.pt`
+- `models/ppo/best_model.pt`
+
+#### 方式2: 运行已训练模型
+
+```bash
+# 单次预测
+python run.py --mode once --symbol ES=F
+
+# 持续运行（每5分钟预测一次）
+python run.py --mode continuous --symbol ES=F --interval 300
+
+# 回测模式
+python run.py --mode backtest --symbol ES=F --start 2023-01-01 --end 2023-12-31
+
+# 使用CPU运行
+python run.py --device cpu --mode once
+```
+
+**输出示例**:
+```
+============================================================
+TRADING SIGNAL
+============================================================
+Symbol:        ES=F
+Current Price: $4521.50
+Direction:     LONG
+Position Size: 45.00%
+Stop Loss:     2.50%
+Take Profit:   5.00%
+Confidence:    78.50%
+Latency:       15.23ms
+Timestamp:     2023-11-20T21:30:00
+============================================================
+```
+
+#### 方式3: 编程方式使用
+
+##### 1. 数据采集
 ```python
 from src.data.downloader import YahooFinanceDownloader
 from src.data.cleaner import DataCleaningPipeline
 
 # 下载数据
 downloader = YahooFinanceDownloader()
-data = downloader.download(symbol="AAPL", start="2020-01-01", end="2024-12-31")
+data = downloader.download(symbol="ES=F", start="2020-01-01", end="2024-12-31")
 
 # 清洗数据
 cleaner = DataCleaningPipeline()
 clean_data = cleaner.transform(data)
 ```
 
-#### 2. 特征工程
+##### 2. 特征工程
 ```python
 from src.features.pipeline import FeatureEngineeringPipeline
 
@@ -122,26 +177,22 @@ feature_pipeline = FeatureEngineeringPipeline()
 features = feature_pipeline.transform(clean_data)
 ```
 
-#### 3. 模型训练
+##### 3. 模型推理
 ```python
-from src.models.ts2vec.trainer import TS2VecTrainer
-from src.models.transformer.trainer import TransformerTrainer
-from src.models.ppo.trainer import PPOTrainer
+from src.api.inference_service import LocalInferenceService
 
-# 训练TS2Vec
-ts2vec_trainer = TS2VecTrainer(config)
-ts2vec_trainer.train(features)
+# 初始化推理服务
+service = LocalInferenceService(model_dir="models", device="auto")
 
-# 训练Transformer
-transformer_trainer = TransformerTrainer(config)
-transformer_trainer.train(features)
+# 执行推理
+signal = service.predict(market_data, features)
 
-# 训练PPO
-ppo_trainer = PPOTrainer(config)
-ppo_trainer.train()
+print(f"Direction: {signal['direction']}")
+print(f"Position Size: {signal['position_size']:.2%}")
+print(f"Confidence: {signal['confidence']:.2%}")
 ```
 
-#### 4. 回测评估
+##### 4. 回测评估
 ```python
 from src.backtest.engine import BacktestEngine
 
