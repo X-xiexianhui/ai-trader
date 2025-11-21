@@ -1,12 +1,12 @@
 """
-特征计算模块 - 计算27维手工特征
+特征计算模块 - 计算26维手工特征
 
-本模块实现了完整的27维手工特征计算，包括：
+本模块实现了完整的26维手工特征计算，包括：
 1. 价格与收益特征（5维）
 2. 波动率特征（5维）
 3. 技术指标特征（4维）
 4. 成交量特征（4维）
-5. K线形态特征（7维）
+5. K线形态特征（6维）- 已删除body_ratio以消除完全共线性
 6. 时间周期特征（2维）
 
 所有特征计算严格遵循以下原则：
@@ -33,15 +33,18 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 class FeatureCalculator:
     """
-    特征计算器 - 计算27维手工特征
+    特征计算器 - 计算26维手工特征
     
     特征组成：
     1. 价格与收益特征（5维）
     2. 波动率特征（5维）
     3. 技术指标特征（4维）
     4. 成交量特征（4维）
-    5. K线形态特征（7维）
+    5. K线形态特征（6维）- 已删除body_ratio
     6. 时间周期特征（2维）
+    
+    注意：body_ratio已被删除，因为它与upper_shadow_ratio和lower_shadow_ratio
+    存在完全共线性关系：body_ratio = 1 - upper_shadow_ratio - lower_shadow_ratio
     """
     
     def __init__(self):
@@ -49,7 +52,7 @@ class FeatureCalculator:
         
     def calculate_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算所有27维特征
+        计算所有26维特征
         
         Args:
             df: 清洗后的OHLC DataFrame
@@ -378,16 +381,18 @@ class FeatureCalculator:
     
     def calculate_candlestick_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        任务1.2.5: 计算K线形态特征（7维）
+        任务1.2.5: 计算K线形态特征（6维）
         
         特征说明：
         1. pos_in_range_20: 在20周期范围内的相对位置 - (close - LL20) / (HH20 - LL20)
         2. dist_to_HH20_norm: 到最高点的归一化距离 - (close - HH20) / close
         3. dist_to_LL20_norm: 到最低点的归一化距离 - (close - LL20) / close
-        4. body_ratio: K线实体比例 - |close - open| / (high - low)
-        5. upper_shadow_ratio: 上影线比例 - (high - max(open, close)) / (high - low)
-        6. lower_shadow_ratio: 下影线比例 - (min(open, close) - low) / (high - low)
-        7. FVG: 公允价值缺口
+        4. upper_shadow_ratio: 上影线比例 - (high - max(open, close)) / (high - low)
+        5. lower_shadow_ratio: 下影线比例 - (min(open, close) - low) / (high - low)
+        6. FVG: 公允价值缺口
+        
+        注意：body_ratio已删除，因为它与upper_shadow_ratio和lower_shadow_ratio完全共线
+        (body_ratio = 1 - upper_shadow_ratio - lower_shadow_ratio)
         
         Args:
             df: 包含OHLC数据的DataFrame
@@ -431,34 +436,27 @@ class FeatureCalculator:
         # 将0替换为一个很小的数，避免除零
         candle_range = candle_range.replace(0, 1e-10)
         
-        # 4. body_ratio: 实体比例
-        with np.errstate(divide='ignore', invalid='ignore'):
-            df['body_ratio'] = np.abs(df['Close'] - df['Open']) / candle_range
-        df['body_ratio'] = df['body_ratio'].replace([np.inf, -np.inf], np.nan)
-        # 确保在[0,1]范围内
-        df['body_ratio'] = df['body_ratio'].clip(0, 1)
-        
-        # 5. upper_shadow_ratio: 上影线比例
+        # 4. upper_shadow_ratio: 上影线比例
         max_oc = df[['Open', 'Close']].max(axis=1)
         with np.errstate(divide='ignore', invalid='ignore'):
             df['upper_shadow_ratio'] = (df['High'] - max_oc) / candle_range
         df['upper_shadow_ratio'] = df['upper_shadow_ratio'].replace([np.inf, -np.inf], np.nan)
         df['upper_shadow_ratio'] = df['upper_shadow_ratio'].clip(0, 1)
         
-        # 6. lower_shadow_ratio: 下影线比例
+        # 5. lower_shadow_ratio: 下影线比例
         min_oc = df[['Open', 'Close']].min(axis=1)
         with np.errstate(divide='ignore', invalid='ignore'):
             df['lower_shadow_ratio'] = (min_oc - df['Low']) / candle_range
         df['lower_shadow_ratio'] = df['lower_shadow_ratio'].replace([np.inf, -np.inf], np.nan)
         df['lower_shadow_ratio'] = df['lower_shadow_ratio'].clip(0, 1)
         
-        # 7. FVG: 公允价值缺口（任务1.2.7）
+        # 6. FVG: 公允价值缺口（任务1.2.7）
         df['FVG'] = self._calculate_fvg(df)
         
         # 记录特征名称
         self.feature_names.extend([
             'pos_in_range_20', 'dist_to_HH20_norm', 'dist_to_LL20_norm',
-            'body_ratio', 'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'
+            'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'
         ])
         
         logger.debug(f"K线形态特征计算完成: {len(df)}行数据")
@@ -591,6 +589,6 @@ class FeatureCalculator:
             'technical': ['EMA20', 'stoch', 'MACD', 'VWAP'],
             'volume': ['volume', 'volume_zscore', 'volume_change_1', 'OBV_slope_20'],
             'candlestick': ['pos_in_range_20', 'dist_to_HH20_norm', 'dist_to_LL20_norm',
-                          'body_ratio', 'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'],
+                          'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'],
             'time': ['sin_tod', 'cos_tod']
         }
