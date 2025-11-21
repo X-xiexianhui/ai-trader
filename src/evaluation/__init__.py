@@ -1,16 +1,15 @@
 """
 模型评估模块
-包含特征验证、模型评估和性能分析
+包含模型评估和性能分析
 
 模块6: 评估层 - 完整实现
 - Walk-forward验证 (6.1)
-- 特征重要性分析 (6.2)
+- 特征重要性分析 (6.2) - 在模型训练后评估
 - 过拟合检测 (6.3)
 - 市场状态泛化 (6.4)
-"""
 
-# 特征验证 (模块1.4)
-from .feature_validator import FeatureValidator
+注意: 特征验证(1.4)已移至src/features模块，在特征工程阶段使用
+"""
 
 # Walk-forward验证 (模块6.1)
 from .walk_forward import (
@@ -38,9 +37,6 @@ from .market_state import (
 )
 
 __all__ = [
-    # 特征验证
-    'FeatureValidator',
-    
     # Walk-forward验证
     'TimeWindowGenerator',
     'WalkForwardValidator',

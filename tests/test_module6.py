@@ -14,6 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+# 从evaluation模块导入
 from src.evaluation import (
     TimeWindowGenerator,
     WalkForwardValidator,
