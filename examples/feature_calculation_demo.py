@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from src.data.features import FeatureCalculator
+from src.features import FeatureCalculator
 import logging
 
 # 配置日志

@@ -42,8 +42,8 @@ from src.models.transformer.evaluation import (
     StateRepresentationQuality,
     AttentionVisualizer
 )
-from src.data.features import FeatureCalculator
-from src.data.normalization import FeatureNormalizer
+from src.features import FeatureCalculator
+from src.features.feature_scaler import FeatureNormalizer
 
 # 配置日志
 logging.basicConfig(
