@@ -168,7 +168,7 @@ class FeatureCalculator:
         2. vol_20: 20周期收盘价标准差
         3. range_20_norm: 归一化20周期价格范围 - (HH20 - LL20) / close[t]
         4. BB_width_norm: 归一化布林带宽度 - (BB_upper - BB_lower) / close[t]
-        5. parkinson_vol: Parkinson波动率估计
+        5. parkinson_vol: Parkinson波动率估计（对数变换后）
         
         Args:
             df: 包含OHLC数据的DataFrame
@@ -180,6 +180,7 @@ class FeatureCalculator:
         - 使用pandas-ta库计算ATR和布林带
         - 所有归一化特征除以当前收盘价
         - Parkinson波动率对high=low的情况做了特殊处理
+        - parkinson_vol已进行对数变换 log(parkinson_vol + ε)，以改善右偏分布
         """
         df = df.copy()
         
@@ -214,13 +215,20 @@ class FeatureCalculator:
             df['BB_width_norm'] = (bb_upper - bb_lower) / df['Close']
         df['BB_width_norm'] = df['BB_width_norm'].replace([np.inf, -np.inf], np.nan)
         
-        # 5. parkinson_vol: Parkinson波动率
+        # 5. parkinson_vol: Parkinson波动率（对数变换）
         # 公式: sqrt(1/(4*log(2)) * log(high/low)^2)
         # 处理high=low的情况（避免log(1)=0导致的问题）
         with np.errstate(divide='ignore', invalid='ignore'):
             high_low_ratio = df['High'] / df['Low']
             log_ratio = np.log(high_low_ratio)
-            df['parkinson_vol'] = np.sqrt(1 / (4 * np.log(2)) * log_ratio ** 2)
+            parkinson_vol_raw = np.sqrt(1 / (4 * np.log(2)) * log_ratio ** 2)
+        
+        # 对数变换: log(parkinson_vol + ε)
+        # 根据分析结果，原始parkinson_vol具有右偏、长尾和极端值聚集特征
+        # 对数变换可以改善分布，使其更接近正态分布
+        epsilon = 1e-10  # 避免log(0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['parkinson_vol'] = np.log(parkinson_vol_raw + epsilon)
         df['parkinson_vol'] = df['parkinson_vol'].replace([np.inf, -np.inf], np.nan)
         
         # 记录特征名称

@@ -24,7 +24,7 @@
 ### 1.3 技术栈
 - **深度学习**: PyTorch 2.9.0, CUDA 12.6, Python 3.11.14
 - **强化学习**: Stable-Baselines3 或 CleanRL
-- **数据处理**: Pandas, NumPy, Pandas-TA
+- **数据处理**: Pandas, NumPy, TA
 - **回测框架**: Backtrader
 - **数据源**: yfinance
 
