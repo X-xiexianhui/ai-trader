@@ -14,9 +14,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-from src.data.cleaning import DataCleaner
-from src.data.features import FeatureCalculator
-from src.data.normalization import FeatureScaler
+from src.features import DataCleaner, FeatureCalculator, FeatureScaler
 
 
 def generate_sample_data(n_samples: int = 1000) -> pd.DataFrame:

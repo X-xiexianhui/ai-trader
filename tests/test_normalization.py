@@ -8,7 +8,7 @@ import pandas as pd
 import tempfile
 from pathlib import Path
 
-from src.data.normalization import StandardScaler, RobustScaler, FeatureScaler
+from src.features import StandardScaler, RobustScaler, FeatureScaler
 
 
 class TestStandardScaler:

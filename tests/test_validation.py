@@ -8,7 +8,7 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 
-from src.data.validation import FeatureValidator
+from src.evaluation import FeatureValidator
 
 
 class TestFeatureValidator:

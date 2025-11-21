@@ -21,10 +21,8 @@ import numpy as np
 from datetime import datetime, timedelta
 from sklearn.ensemble import RandomForestRegressor
 
-from src.data.cleaning import DataCleaner
-from src.data.features import FeatureCalculator
-from src.data.normalization import FeatureScaler
-from src.data.validation import FeatureValidator
+from src.features import DataCleaner, FeatureCalculator, FeatureScaler
+from src.evaluation import FeatureValidator
 
 
 def generate_sample_data(n_samples: int = 1000) -> pd.DataFrame:
