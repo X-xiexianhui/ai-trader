@@ -5,41 +5,53 @@ torchvision>=0.15.0
 # 数据处理
 pandas>=2.0.0
 numpy>=1.24.0
-ta>=0.11.0
-
-# 科学计算
 scipy>=1.10.0
-scikit-learn>=1.3.0
 
-# 强化学习
-stable-baselines3>=2.0.0
-gymnasium>=0.28.0
+# 技术指标
+pandas-ta>=0.3.14b
 
-# 回测框架
-backtrader>=1.9.76
-
-# 数据源
-yfinance>=0.2.0
+# 数据下载
+yfinance>=0.2.28
 
 # 数据存储
 pyarrow>=12.0.0
 tables>=3.8.0
 
-# 工具库
-joblib>=1.3.0
-tqdm>=4.65.0
-pyyaml>=6.0
+# 回测框架
+backtrader>=1.9.78.123
+
+# 强化学习
+stable-baselines3>=2.0.0
+gymnasium>=0.28.0
 
 # 可视化
 matplotlib>=3.7.0
 seaborn>=0.12.0
 plotly>=5.14.0
 
-# 日志和监控
-tensorboard>=2.13.0
-wandb>=0.15.0
+# 机器学习
+scikit-learn>=1.3.0
 
-# 开发工具
+# 配置文件
+pyyaml>=6.0
+
+# 进度条
+tqdm>=4.65.0
+
+# 日志
+colorlog>=6.7.0
+
+# TensorBoard (可选)
+tensorboard>=2.13.0
+
+# 模型摘要 (可选)
+torchsummary>=1.5.1
+
+# 测试
 pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# 代码质量
 black>=23.0.0
 flake8>=6.0.0
+mypy>=1.4.0

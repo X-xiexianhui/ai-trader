@@ -1,61 +1,67 @@
 # AI交易系统 - 基于TS2Vec-Transformer-PPO
 
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PyTorch 2.0+](https://img.shields.io/badge/pytorch-2.0+-red.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 一个融合"形态识别 → 状态建模 → 动作决策"的三层智能交易系统，用于5分钟级别期货交易。
 
-## 📋 项目概述
+## 🎯 项目目标
 
-本项目实现了一个完整的深度强化学习交易系统，包含三个核心模块：
+构建一个以**快速训练验证模型效果**为核心目标的智能交易系统，按照**最简单的路线**实现核心功能。
 
-1. **TS2Vec形态编码器** - 使用对比学习提取时间序列的深层特征
-2. **Transformer状态建模器** - 建模市场状态的时序依赖关系
-3. **PPO强化学习** - 学习最优交易策略
-
-## 🏗️ 项目结构
+## 🏗️ 系统架构
 
 ```
-ai-trader-demo/
-├── src/                      # 源代码
-│   ├── data/                 # 数据层
-│   │   ├── cleaning.py       # 数据清洗（任务1.1.1-1.1.4）
-│   │   ├── features.py       # 特征计算（任务1.2.1-1.2.7）
-│   │   ├── downloader.py     # 数据下载（任务5.1.1-5.1.2）
-│   │   └── storage.py        # 数据存储（任务5.1.3）
-│   ├── models/               # 模型层
-│   │   ├── ts2vec/          # TS2Vec模型
-│   │   ├── transformer/     # Transformer模型
-│   │   └── ppo/             # PPO模型
-│   ├── backtest/            # 回测模块
-│   │   ├── engine.py        # 回测引擎（任务5.2.1）
-│   │   ├── execution.py     # 订单执行（任务5.2.2-5.2.3）
-│   │   ├── strategy.py      # 策略接口
-│   │   └── recorder.py      # 结果记录（任务5.2.4）
-│   ├── features/            # 特征工程
-│   ├── evaluation/          # 评估模块
-│   └── utils/               # 工具函数
-├── configs/                 # 配置文件
-│   └── config.yaml          # 主配置文件
-├── data/                    # 数据目录
-│   ├── raw/                 # 原始数据
-│   └── processed/           # 处理后数据
-├── models/                  # 模型保存
-│   ├── checkpoints/         # 训练检查点
-│   └── scalers/             # 归一化器
-├── logs/                    # 日志文件
-├── tests/                   # 单元测试
-├── examples/                # 示例代码
-│   └── data_pipeline_demo.py
-├── requirements.txt         # 依赖包
-└── README.md               # 项目文档
+原始OHLC数据
+    ↓
+[数据层] 数据清洗 + 27维手工特征
+    ↓
+[TS2Vec层] 形态识别 → 128维embedding
+    ↓
+[Transformer层] 状态建模 → 256维状态向量
+    ↓
+[PPO层] 动作决策 → 交易信号
+    ↓
+[回测层] 性能评估
 ```
 
-## 🚀 快速开始
+## ✨ 核心特性
 
-### 1. 环境配置
+### 1. 三层架构设计
+- **TS2Vec形态编码器**: 无监督学习提取时间序列形态特征
+- **Transformer状态建模器**: 融合embedding和手工特征，建模市场状态
+- **PPO强化学习**: 基于状态向量进行交易决策
+
+### 2. 完整的数据处理流程
+- 数据清洗（缺失值、异常值、时间对齐）
+- 27维手工特征（价格、波动率、技术指标、成交量、K线形态、时间周期）
+- 特征归一化（StandardScaler + RobustScaler）
+- 特征验证（信息量测试、置换重要性、相关性检测、VIF）
+
+### 3. 端到端训练和评估
+- 统一的训练脚本（支持TS2Vec、Transformer、PPO）
+- 多种评估模式（回测、Walk-forward、过拟合检测、市场状态分析）
+- 完善的日志系统（多级别、彩色输出、TensorBoard集成）
+
+### 4. 实时推理能力
+- 低延迟数据管道（<50ms）
+- 高效的缓冲区管理
+- 支持单条和批量处理
+
+## 📦 安装
+
+### 环境要求
+- Python 3.11+
+- CUDA 12.6+ (可选，用于GPU加速)
+- 8GB+ RAM
+
+### 安装步骤
 
 ```bash
-# 克隆项目
-git clone <repository-url>
-cd ai-trader-demo
+# 克隆仓库
+git clone https://github.com/yourusername/ai-trader.git
+cd ai-trader
 
 # 创建虚拟环境
 python -m venv venv
@@ -67,281 +73,316 @@ venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 ```
 
-### 2. 运行数据处理示例
+## 🚀 快速开始
+
+### 1. 配置文件
+
+编辑 `configs/config.yaml` 设置参数：
+
+```yaml
+data:
+  symbols: ['ES=F']  # 标普500期货
+  interval: '5m'
+  start_date: '2020-01-01'
+  end_date: '2024-12-31'
+
+ts2vec:
+  window_length: 256
+  hidden_dim: 64
+  output_dim: 128
+
+transformer:
+  sequence_length: 64
+  d_model: 256
+  nhead: 8
+  num_layers: 6
+
+ppo:
+  n_steps: 2048
+  learning_rate: 0.0003
+  gamma: 0.99
+```
+
+### 2. 训练模型
 
 ```bash
-cd examples
-python data_pipeline_demo.py
+# 训练所有模型
+python scripts/train.py --config configs/config.yaml --model all
+
+# 或分步训练
+python scripts/train.py --model ts2vec      # 1. 训练TS2Vec
+python scripts/train.py --model transformer # 2. 训练Transformer
+python scripts/train.py --model ppo         # 3. 训练PPO
 ```
 
-这个示例演示了完整的数据处理流程：
-- 数据清洗（缺失值处理、异常值检测）
-- 特征计算（27维手工特征）
-- 特征归一化（StandardScaler和RobustScaler）
+### 3. 评估模型
 
-## 📊 数据层功能
+```bash
+# 评估所有模型
+python scripts/evaluate.py --model all
 
-### 数据清洗模块 (DataCleaner)
+# PPO多种评估模式
+python scripts/evaluate.py --model ppo --mode backtest      # 回测
+python scripts/evaluate.py --model ppo --mode walk_forward  # Walk-forward验证
+python scripts/evaluate.py --model ppo --mode overfitting   # 过拟合检测
+python scripts/evaluate.py --model ppo --mode market_state  # 市场状态分析
+```
 
-实现了以下功能：
+### 4. 查看结果
 
-1. **缺失值处理** (任务1.1.1)
-   - 前向填充用于价格数据
-   - 零填充用于成交量数据
-   - 线性插值用于短期缺失
-   - 删除连续缺失超过5根K线的数据段
+```bash
+# 查看日志
+tail -f logs/train.log
+tail -f logs/evaluate.log
 
-2. **异常值检测与处理** (任务1.1.2)
-   - 使用3σ原则检测价格跳变
-   - 区分真实跳空和数据错误
-   - 修正OHLC一致性约束
+# 启动TensorBoard
+tensorboard --logdir logs/
+```
 
-3. **时间对齐与时区处理** (任务1.1.3)
-   - 转换时区到UTC或指定时区
-   - 处理夏令时切换
-   - 过滤非交易时段数据
-   - 重采样确保严格5分钟间隔
+## 📊 示例代码
 
-4. **数据质量验证** (任务1.1.4)
-   - 完整性检查：缺失值比例<1%
-   - 一致性检查：High>=max(O,C), Low<=min(O,C)
-   - 异常值检查：价格跳变<5σ
-   - 时间检查：间隔严格、无重复
-
-### 特征计算模块 (FeatureCalculator)
-
-计算27维手工特征，分为6组：
-
-1. **价格与收益特征** (5维) - 任务1.2.1
-   - ret_1, ret_5, ret_20: 对数收益率
-   - price_slope_20: 价格线性回归斜率
-   - C_div_MA20: 收盘价/20周期均线
-
-2. **波动率特征** (5维) - 任务1.2.2
-   - ATR14_norm: 归一化ATR
-   - vol_20: 20周期标准差
-   - range_20_norm: 归一化价格范围
-   - BB_width_norm: 归一化布林带宽度
-   - parkinson_vol: Parkinson波动率
-
-3. **技术指标特征** (4维) - 任务1.2.3
-   - EMA20: 指数移动平均
-   - stoch: 随机指标
-   - MACD: MACD线
-   - VWAP: 成交量加权平均价
-
-4. **成交量特征** (4维) - 任务1.2.4
-   - volume: 原始成交量
-   - volume_zscore: 成交量Z-score
-   - volume_change_1: 成交量变化率
-   - OBV_slope_20: OBV斜率
-
-5. **K线形态特征** (7维) - 任务1.2.5
-   - pos_in_range_20: 在20周期范围内的相对位置
-   - dist_to_HH20_norm, dist_to_LL20_norm: 到高低点的距离
-   - body_ratio: 实体比例
-   - upper_shadow_ratio, lower_shadow_ratio: 影线比例
-   - FVG: 公允价值缺口 (任务1.2.7)
-
-6. **时间周期特征** (2维) - 任务1.2.6
-   - sin_tod, cos_tod: 时间的正弦余弦编码
-
-### 特征归一化模块
-
-提供三种归一化器：
-
-1. **StandardScaler** (任务1.3.1)
-   - 用于收益率、价格斜率等特征
-   - z-score标准化：z = (x - μ) / σ
-
-2. **RobustScaler** (任务1.3.2)
-   - 用于波动率、技术指标等对异常值敏感的特征
-   - 鲁棒标准化：z = (x - median) / IQR
-
-3. **FeatureScaler** (任务1.3.3)
-   - 自动为不同特征组选择合适的scaler
-   - 支持保存和加载
-
-## 📈 使用示例
-
-### 数据清洗
+### 数据处理示例
 
 ```python
-from src.data.cleaning import DataCleaner
+from src.pipeline.training_pipeline import TrainingDataPipeline
 
-# 创建清洗器
-cleaner = DataCleaner(max_consecutive_missing=5)
-
-# 执行完整清洗流程
-df_clean, report = cleaner.clean_pipeline(
-    df_raw,
-    target_timezone='UTC',
-    trading_hours=(9, 16)  # 可选：指定交易时段
+# 创建数据管道
+pipeline = TrainingDataPipeline(
+    ts2vec_model_path='models/checkpoints/ts2vec/ts2vec_final.pth',
+    scaler_path='models/scalers/feature_scaler.pkl',
+    config=config
 )
+
+# 处理数据
+train_data, val_data, test_data = pipeline.process(df)
 ```
 
-### 特征计算
+### 实时推理示例
 
 ```python
-from src.data.features import FeatureCalculator
+from src.pipeline.inference_pipeline import InferenceDataPipeline
 
-# 创建特征计算器
-feature_calc = FeatureCalculator()
+# 创建推理管道
+pipeline = InferenceDataPipeline(
+    ts2vec_model_path='models/checkpoints/ts2vec/ts2vec_final.pth',
+    scaler_path='models/scalers/feature_scaler.pkl',
+    config=config
+)
 
-# 计算所有特征
-df_features = feature_calc.calculate_all_features(df_clean)
+# 预热
+pipeline.warmup(historical_data)
 
-# 获取特征名称和分组
-feature_names = feature_calc.get_feature_names()
-feature_groups = feature_calc.get_feature_groups()
+# 处理新数据
+model_input = pipeline.process_new_bar(new_bar)
 ```
 
-### 特征归一化
-
-```python
-from src.data.normalization import FeatureScaler
-
-# 创建归一化器
-scaler = FeatureScaler()
-
-# 拟合并转换训练集
-X_train_scaled = scaler.fit_transform(X_train, feature_groups)
-
-# 转换测试集
-X_test_scaled = scaler.transform(X_test)
-
-# 保存scaler
-scaler.save("models/scalers")
-
-# 加载scaler
-scaler = FeatureScaler.load("models/scalers")
-```
-
-### 数据下载与存储
-
-```python
-from src.data.downloader import DataDownloader, IncrementalUpdater
-from src.data.storage import DataStorage
-
-# 下载数据
-downloader = DataDownloader()
-data = downloader.download('AAPL', '2024-01-01', '2024-12-31', interval='5m')
-
-# 存储数据
-storage = DataStorage(base_path='data/raw')
-storage.save_parquet(data, 'AAPL', compression='snappy')
-
-# 加载数据
-loaded_data = storage.load_parquet('AAPL')
-
-# 增量更新
-updater = IncrementalUpdater(downloader)
-updated_data, new_records = updater.update('AAPL', loaded_data)
-```
-
-### 回测系统
+### 回测示例
 
 ```python
 from src.backtest.engine import BacktestEngine
-from src.backtest.strategy import PPOStrategy
-from src.backtest.recorder import BacktestRecorder
 
 # 创建回测引擎
 engine = BacktestEngine(
-    initial_cash=100000.0,
-    commission=0.001,
-    slippage=0.0005
+    agent=ppo_agent,
+    transformer_model=transformer_model,
+    config=config
 )
 
-# 添加数据和策略
-engine.add_data(data, name='AAPL')
-engine.add_strategy(PPOStrategy, verbose=True)
-
 # 运行回测
-results = engine.run()
-
-# 获取结果
-strategy = results[0]
-backtest_results = engine.get_results(strategy)
-
-# 记录结果
-recorder = BacktestRecorder(output_dir='results/backtest')
-files = recorder.generate_full_report()
+results = engine.run(test_data)
+print(f"夏普比率: {results['sharpe_ratio']:.2f}")
+print(f"最大回撤: {results['max_drawdown']:.2%}")
 ```
 
-## 🎯 开发进度
+## 📁 项目结构
 
-### 里程碑1: 数据基础设施 ✅ (已完成)
+```
+ai-trader/
+├── configs/                    # 配置文件
+│   └── config.yaml
+├── data/                       # 数据目录
+│   ├── raw/                   # 原始数据
+│   └── processed/             # 处理后数据
+├── docs/                       # 文档
+│   ├── MODULE_3_COMPLETION_SUMMARY.md
+│   ├── MODULE_7_COMPLETION_SUMMARY.md
+│   └── ...
+├── examples/                   # 示例代码
+│   ├── data_pipeline_demo.py
+│   ├── ts2vec_training_demo.py
+│   ├── transformer_training_demo.py
+│   └── ppo_training_demo.py
+├── logs/                       # 日志目录
+├── models/                     # 模型保存目录
+│   ├── checkpoints/
+│   └── scalers/
+├── scripts/                    # 脚本
+│   ├── train.py               # 训练脚本
+│   └── evaluate.py            # 评估脚本
+├── src/                        # 源代码
+│   ├── data/                  # 数据模块
+│   │   ├── downloader.py
+│   │   └── storage.py
+│   ├── features/              # 特征模块
+│   │   ├── data_cleaner.py
+│   │   ├── feature_calculator.py
+│   │   └── feature_scaler.py
+│   ├── models/                # 模型模块
+│   │   ├── ts2vec/
+│   │   ├── transformer/
+│   │   └── ppo/
+│   ├── pipeline/              # 数据管道
+│   │   ├── training_pipeline.py
+│   │   └── inference_pipeline.py
+│   ├── backtest/              # 回测模块
+│   │   ├── engine.py
+│   │   ├── strategy.py
+│   │   └── recorder.py
+│   ├── evaluation/            # 评估模块
+│   │   ├── walk_forward.py
+│   │   ├── overfitting_detection.py
+│   │   └── market_state.py
+│   └── utils/                 # 工具模块
+│       └── logger.py
+├── tests/                      # 测试
+├── requirements.txt            # 依赖
+├── task.md                     # 任务文档
+├── design_document.md          # 设计文档
+└── README.md                   # 本文件
+```
 
-- [x] 任务1.1.1: OHLC数据缺失值处理
-- [x] 任务1.1.2: 价格异常值检测与处理
-- [x] 任务1.1.3: 时间对齐与时区处理
-- [x] 任务1.1.4: 数据质量验证器
-- [x] 任务1.2.1: 价格与收益特征计算（5维）
-- [x] 任务1.2.2: 波动率特征计算（5维）
-- [x] 任务1.2.3: 技术指标特征计算（4维）
-- [x] 任务1.2.4: 成交量特征计算（4维）
-- [x] 任务1.2.5: K线形态特征计算（7维）
-- [x] 任务1.2.6: 时间周期特征计算（2维）
-- [x] 任务1.2.7: FVG公允价值缺口计算
-- [x] 任务1.3.1: StandardScaler归一化器
-- [x] 任务1.3.2: RobustScaler归一化器
-- [x] 任务1.3.3: 归一化器的保存与加载
+## 🔬 技术栈
 
-### 里程碑2: TS2Vec形态编码器 (进行中)
+### 深度学习
+- **PyTorch 2.0+**: 深度学习框架
+- **TS2Vec**: 时间序列对比学习
+- **Transformer**: 序列建模
+- **PPO**: 强化学习算法
 
-- [ ] 任务2.1.1-2.1.5: 数据准备模块
-- [ ] 任务2.2.1-2.2.4: 模型实现
-- [ ] 任务2.3.1-2.3.4: 训练流程
-- [ ] 任务2.4.1-2.4.5: 评估指标
+### 数据处理
+- **Pandas**: 数据处理
+- **NumPy**: 数值计算
+- **TA-Lib**: 技术指标计算
 
-### 里程碑5: 测试层 ✅ (已完成)
+### 回测与评估
+- **Backtrader**: 回测框架
+- **scikit-learn**: 机器学习工具
 
-- [x] 任务5.1.1: 实现yfinance数据下载器
-- [x] 任务5.1.2: 实现数据增量更新
-- [x] 任务5.1.3: 实现数据存储（Parquet/HDF5）
-- [x] 任务5.2.1: 实现Backtrader回测引擎集成
-- [x] 任务5.2.2: 实现订单执行模拟
-- [x] 任务5.2.3: 实现滑点与手续费模拟
-- [x] 任务5.2.4: 实现回测结果记录
+### 工程化
+- **TensorBoard**: 训练可视化
+- **colorlog**: 彩色日志
+- **PyYAML**: 配置管理
 
-### 里程碑3-4, 6-7: 待开发
+## 📈 性能指标
 
-详见 [task.md](task.md) 文件
+### 模型性能
+- **TS2Vec**: 
+  - 对比损失 < 0.5
+  - 正样本相似度 > 0.8
+  - 线性探测准确率 > 55%
 
-## 🔧 技术栈
+- **Transformer**:
+  - 回归MSE < 0.01
+  - 分类准确率 > 55%
+  - 状态向量方差 > 0.1
 
-- **深度学习**: PyTorch 2.0+
-- **数据处理**: Pandas, NumPy, Pandas-TA
-- **强化学习**: Stable-Baselines3
-- **回测框架**: Backtrader
-- **数据源**: yfinance
+- **PPO**:
+  - 夏普比率 > 1.5
+  - 最大回撤 < 20%
+  - 年化收益率 > 15%
+  - 胜率 > 50%
 
-## 📝 核心设计原则
+### 系统性能
+- 训练数据管道: ~1000条/秒
+- 推理延迟: <50ms
+- 内存占用: <2GB（训练）, <500MB（推理）
 
-1. ✅ 以验证模型效果为核心目标
-2. ✅ 按照最简单的路线实现
-3. ✅ 不拓展其他复杂功能
-4. ✅ 使用面向对象风格
-5. ✅ 要求高内聚低耦合
+## 📚 文档
 
-## 📖 文档
+- [任务拆分文档](task.md) - 详细的任务列表和依赖关系
+- [设计文档](design_document.md) - 系统设计和技术细节
+- [模块3完成总结](docs/MODULE_3_COMPLETION_SUMMARY.md) - Transformer模块
+- [模块7完成总结](docs/MODULE_7_COMPLETION_SUMMARY.md) - 工程化模块
 
-- [任务拆分文档](task.md) - 详细的87个任务列表
-- [设计文档](design_document.md) - 系统架构设计
+## 🧪 测试
+
+```bash
+# 运行所有测试
+pytest tests/
+
+# 运行特定测试
+pytest tests/test_data_cleaning.py
+pytest tests/test_features.py
+pytest tests/test_module5.py
+pytest tests/test_module6.py
+
+# 查看覆盖率
+pytest --cov=src tests/
+```
+
+## 🛠️ 开发指南
+
+### 代码风格
+- 使用Black格式化代码
+- 使用flake8检查代码质量
+- 使用mypy进行类型检查
+
+```bash
+black src/
+flake8 src/
+mypy src/
+```
+
+### 添加新特征
+1. 在 `src/features/feature_calculator.py` 中添加计算方法
+2. 在 `configs/config.yaml` 中配置参数
+3. 添加单元测试
+4. 更新文档
+
+### 添加新模型
+1. 在 `src/models/` 下创建新目录
+2. 实现模型、训练器、评估器
+3. 在训练和评估脚本中集成
+4. 添加示例代码
 
 ## 🤝 贡献
 
-欢迎提交Issue和Pull Request！
+欢迎贡献！请遵循以下步骤：
 
-## 📄 许可证
+1. Fork本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启Pull Request
 
-MIT License
+## 📝 许可证
 
-## 👨‍💻 作者
+本项目采用MIT许可证 - 详见 [LICENSE](LICENSE) 文件
 
-Kilo Code
+## 🙏 致谢
+
+- [TS2Vec](https://github.com/yuezhihan/ts2vec) - 时间序列对比学习
+- [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) - 强化学习库
+- [Backtrader](https://github.com/mementum/backtrader) - 回测框架
+
+## 📧 联系方式
+
+- 项目主页: [https://github.com/yourusername/ai-trader](https://github.com/yourusername/ai-trader)
+- 问题反馈: [Issues](https://github.com/yourusername/ai-trader/issues)
+
+## 🗺️ 路线图
+
+- [x] 模块1: 数据层
+- [x] 模块2: TS2Vec形态编码器
+- [x] 模块3: Transformer状态建模器
+- [x] 模块4: PPO强化学习
+- [x] 模块5: 测试层
+- [x] 模块6: 评估层
+- [x] 模块7: 工程化
+- [ ] 模块8: 部署（可选）
+- [ ] 模块9: 监控告警（可选）
+- [ ] 模块10: 超参数优化（可选）
 
 ---
 
-**注意**: 本项目仅用于学习和研究目的，不构成任何投资建议。
+**注意**: 本项目仅用于学习和研究目的，不构成任何投资建议。实盘交易需谨慎，风险自负。
