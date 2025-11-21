@@ -1,15 +1,34 @@
 """
 特征计算模块 - 计算27维手工特征
+
+本模块实现了完整的27维手工特征计算，包括：
+1. 价格与收益特征（5维）
+2. 波动率特征（5维）
+3. 技术指标特征（4维）
+4. 成交量特征（4维）
+5. K线形态特征（7维）
+6. 时间周期特征（2维）
+
+所有特征计算严格遵循以下原则：
+- 不引入未来信息（仅使用历史数据）
+- 正确处理边界情况（前N根K线）
+- 确保数值稳定性（处理inf/nan/除零）
+- 提供详细的文档和注释
 """
 
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
-from typing import Dict, Optional
+from ta import volatility, trend, momentum, volume as ta_volume
+from typing import Dict, Optional, List
 from scipy import stats
 import logging
+import warnings
 
+# 配置日志
 logger = logging.getLogger(__name__)
+
+# 忽略pandas的警告
+warnings.filterwarnings('ignore', category=FutureWarning)
 
 
 class FeatureCalculator:
@@ -71,35 +90,72 @@ class FeatureCalculator:
         """
         任务1.2.1: 计算价格与收益特征（5维）
         
-        特征：
-        1. ret_1: log(close[t] / close[t-1])
-        2. ret_5: log(close[t] / close[t-5])
-        3. ret_20: log(close[t] / close[t-20])
+        特征说明：
+        1. ret_1: 1周期对数收益率 - log(close[t] / close[t-1])
+        2. ret_5: 5周期对数收益率 - log(close[t] / close[t-5])
+        3. ret_20: 20周期对数收益率 - log(close[t] / close[t-20])
         4. price_slope_20: 20周期价格线性回归斜率
-        5. C_div_MA20: close[t] / MA(close, 20)
+        5. C_div_MA20: 收盘价相对20周期均线的比值
+        
+        Args:
+            df: 包含OHLC数据的DataFrame
+            
+        Returns:
+            添加了价格与收益特征的DataFrame
+            
+        注意：
+        - 所有计算仅使用历史数据，不引入未来信息
+        - 前20根K线的某些特征会是NaN（正常现象）
+        - 对数收益率处理了除零和负值情况
         """
         df = df.copy()
         
         # 1. ret_1: 1周期对数收益率
-        df['ret_1'] = np.log(df['Close'] / df['Close'].shift(1))
+        # 处理可能的除零和负值
+        close_shifted_1 = df['Close'].shift(1)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['ret_1'] = np.log(df['Close'] / close_shifted_1)
+        # 将inf和-inf替换为NaN
+        df['ret_1'] = df['ret_1'].replace([np.inf, -np.inf], np.nan)
         
         # 2. ret_5: 5周期对数收益率
-        df['ret_5'] = np.log(df['Close'] / df['Close'].shift(5))
+        close_shifted_5 = df['Close'].shift(5)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['ret_5'] = np.log(df['Close'] / close_shifted_5)
+        df['ret_5'] = df['ret_5'].replace([np.inf, -np.inf], np.nan)
         
         # 3. ret_20: 20周期对数收益率
-        df['ret_20'] = np.log(df['Close'] / df['Close'].shift(20))
+        close_shifted_20 = df['Close'].shift(20)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['ret_20'] = np.log(df['Close'] / close_shifted_20)
+        df['ret_20'] = df['ret_20'].replace([np.inf, -np.inf], np.nan)
         
         # 4. price_slope_20: 20周期价格线性回归斜率
-        df['price_slope_20'] = df['Close'].rolling(window=20).apply(
-            lambda x: stats.linregress(range(len(x)), x)[0] if len(x) == 20 else np.nan,
-            raw=True
+        # 使用scipy.stats.linregress计算斜率
+        def calculate_slope(x):
+            """计算线性回归斜率"""
+            if len(x) < 20 or np.isnan(x).any():
+                return np.nan
+            try:
+                slope, _, _, _, _ = stats.linregress(range(len(x)), x)
+                return slope
+            except:
+                return np.nan
+        
+        df['price_slope_20'] = df['Close'].rolling(window=20, min_periods=20).apply(
+            calculate_slope, raw=True
         )
         
         # 5. C_div_MA20: 收盘价除以20周期均线
-        ma20 = df['Close'].rolling(window=20).mean()
-        df['C_div_MA20'] = df['Close'] / ma20
+        ma20 = df['Close'].rolling(window=20, min_periods=20).mean()
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['C_div_MA20'] = df['Close'] / ma20
+        df['C_div_MA20'] = df['C_div_MA20'].replace([np.inf, -np.inf], np.nan)
         
+        # 记录特征名称
         self.feature_names.extend(['ret_1', 'ret_5', 'ret_20', 'price_slope_20', 'C_div_MA20'])
+        
+        logger.debug(f"价格与收益特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -107,44 +163,72 @@ class FeatureCalculator:
         """
         任务1.2.2: 计算波动率特征（5维）
         
-        特征：
-        1. ATR14_norm: ATR(14) / close[t]
-        2. vol_20: std(close[-20:])
-        3. range_20_norm: (HH20 - LL20) / close[t]
-        4. BB_width_norm: (BB_upper - BB_lower) / close[t]
-        5. parkinson_vol: sqrt(1/(4*log(2)) * log(high/low)^2)
+        特征说明：
+        1. ATR14_norm: 归一化ATR(14) - ATR(14) / close[t]
+        2. vol_20: 20周期收盘价标准差
+        3. range_20_norm: 归一化20周期价格范围 - (HH20 - LL20) / close[t]
+        4. BB_width_norm: 归一化布林带宽度 - (BB_upper - BB_lower) / close[t]
+        5. parkinson_vol: Parkinson波动率估计
+        
+        Args:
+            df: 包含OHLC数据的DataFrame
+            
+        Returns:
+            添加了波动率特征的DataFrame
+            
+        注意：
+        - 使用pandas-ta库计算ATR和布林带
+        - 所有归一化特征除以当前收盘价
+        - Parkinson波动率对high=low的情况做了特殊处理
         """
         df = df.copy()
         
         # 1. ATR14_norm: 归一化ATR
-        atr = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-        df['ATR14_norm'] = atr / df['Close']
+        # 使用ta库计算ATR
+        atr_indicator = volatility.AverageTrueRange(
+            high=df['High'], low=df['Low'], close=df['Close'], window=14
+        )
+        atr_series = atr_indicator.average_true_range()
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['ATR14_norm'] = atr_series / df['Close']
+        df['ATR14_norm'] = df['ATR14_norm'].replace([np.inf, -np.inf], np.nan)
         
         # 2. vol_20: 20周期收盘价标准差
-        df['vol_20'] = df['Close'].rolling(window=20).std()
+        df['vol_20'] = df['Close'].rolling(window=20, min_periods=20).std()
         
         # 3. range_20_norm: 归一化20周期价格范围
-        hh20 = df['High'].rolling(window=20).max()
-        ll20 = df['Low'].rolling(window=20).min()
-        df['range_20_norm'] = (hh20 - ll20) / df['Close']
+        hh20 = df['High'].rolling(window=20, min_periods=20).max()
+        ll20 = df['Low'].rolling(window=20, min_periods=20).min()
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['range_20_norm'] = (hh20 - ll20) / df['Close']
+        df['range_20_norm'] = df['range_20_norm'].replace([np.inf, -np.inf], np.nan)
         
         # 4. BB_width_norm: 归一化布林带宽度
-        bb = ta.bbands(df['Close'], length=20, std=2)
-        if bb is not None and len(bb.columns) >= 3:
-            bb_upper = bb.iloc[:, 0]  # BBU_20_2.0
-            bb_lower = bb.iloc[:, 2]  # BBL_20_2.0
+        # 使用ta库计算布林带
+        bb_indicator = volatility.BollingerBands(
+            close=df['Close'], window=20, window_dev=2
+        )
+        bb_upper = bb_indicator.bollinger_hband()
+        bb_lower = bb_indicator.bollinger_lband()
+        with np.errstate(divide='ignore', invalid='ignore'):
             df['BB_width_norm'] = (bb_upper - bb_lower) / df['Close']
-        else:
-            df['BB_width_norm'] = np.nan
+        df['BB_width_norm'] = df['BB_width_norm'].replace([np.inf, -np.inf], np.nan)
         
         # 5. parkinson_vol: Parkinson波动率
-        df['parkinson_vol'] = np.sqrt(
-            1 / (4 * np.log(2)) * np.log(df['High'] / df['Low']) ** 2
-        )
+        # 公式: sqrt(1/(4*log(2)) * log(high/low)^2)
+        # 处理high=low的情况（避免log(1)=0导致的问题）
+        with np.errstate(divide='ignore', invalid='ignore'):
+            high_low_ratio = df['High'] / df['Low']
+            log_ratio = np.log(high_low_ratio)
+            df['parkinson_vol'] = np.sqrt(1 / (4 * np.log(2)) * log_ratio ** 2)
+        df['parkinson_vol'] = df['parkinson_vol'].replace([np.inf, -np.inf], np.nan)
         
+        # 记录特征名称
         self.feature_names.extend([
             'ATR14_norm', 'vol_20', 'range_20_norm', 'BB_width_norm', 'parkinson_vol'
         ])
+        
+        logger.debug(f"波动率特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -152,36 +236,60 @@ class FeatureCalculator:
         """
         任务1.2.3: 计算技术指标特征（4维）
         
-        特征：
-        1. EMA20: EMA(close, 20)
-        2. stoch: Stochastic(9, 3, 3) 的%K值
-        3. MACD: MACD(12, 26, 9) 的MACD线
-        4. VWAP: 成交量加权平均价
+        特征说明：
+        1. EMA20: 20周期指数移动平均
+        2. stoch: 随机指标的%K值 - Stochastic(9, 3, 3)
+        3. MACD: MACD指标的MACD线 - MACD(12, 26, 9)
+        4. VWAP: 成交量加权平均价（20周期滚动窗口）
+        
+        Args:
+            df: 包含OHLC和Volume数据的DataFrame
+            
+        Returns:
+            添加了技术指标特征的DataFrame
+            
+        注意：
+        - 使用pandas-ta库计算所有技术指标
+        - VWAP使用20周期滚动窗口计算
+        - 处理了成交量为0的情况
         """
         df = df.copy()
         
         # 1. EMA20: 20周期指数移动平均
-        df['EMA20'] = ta.ema(df['Close'], length=20)
+        ema_indicator = trend.EMAIndicator(close=df['Close'], window=20)
+        df['EMA20'] = ema_indicator.ema_indicator()
         
         # 2. stoch: 随机指标%K值
-        stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=9, d=3, smooth_k=3)
-        if stoch is not None and len(stoch.columns) >= 1:
-            df['stoch'] = stoch.iloc[:, 0]  # STOCHk_9_3_3
-        else:
-            df['stoch'] = np.nan
+        # ta库的StochasticOscillator
+        stoch_indicator = momentum.StochasticOscillator(
+            high=df['High'], low=df['Low'], close=df['Close'],
+            window=9, smooth_window=3
+        )
+        df['stoch'] = stoch_indicator.stoch()
         
         # 3. MACD: MACD线
-        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
-        if macd is not None and len(macd.columns) >= 1:
-            df['MACD'] = macd.iloc[:, 0]  # MACD_12_26_9
+        # ta库的MACD
+        macd_indicator = trend.MACD(
+            close=df['Close'], window_slow=26, window_fast=12, window_sign=9
+        )
+        df['MACD'] = macd_indicator.macd()
+        
+        # 4. VWAP: 成交量加权平均价
+        # 使用20周期滚动窗口计算VWAP
+        if 'Volume' in df.columns:
+            price_volume = (df['Close'] * df['Volume']).rolling(window=20, min_periods=20).sum()
+            volume_sum = df['Volume'].rolling(window=20, min_periods=20).sum()
+            with np.errstate(divide='ignore', invalid='ignore'):
+                df['VWAP'] = price_volume / volume_sum
+            df['VWAP'] = df['VWAP'].replace([np.inf, -np.inf], np.nan)
         else:
-            df['MACD'] = np.nan
+            logger.warning("缺少Volume列，VWAP使用NaN填充")
+            df['VWAP'] = np.nan
         
-        # 4. VWAP: 成交量加权平均价（使用滚动窗口）
-        df['VWAP'] = (df['Close'] * df['Volume']).rolling(window=20).sum() / \
-                     df['Volume'].rolling(window=20).sum()
-        
+        # 记录特征名称
         self.feature_names.extend(['EMA20', 'stoch', 'MACD', 'VWAP'])
+        
+        logger.debug(f"技术指标特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -189,36 +297,74 @@ class FeatureCalculator:
         """
         任务1.2.4: 计算成交量特征（4维）
         
-        特征：
+        特征说明：
         1. volume: 原始成交量
-        2. volume_zscore: (volume - mean(volume[-20:])) / std(volume[-20:])
-        3. volume_change_1: (volume[t] - volume[t-1]) / volume[t-1]
+        2. volume_zscore: 成交量Z-score - (volume - mean(volume[-20:])) / std(volume[-20:])
+        3. volume_change_1: 成交量变化率 - (volume[t] - volume[t-1]) / volume[t-1]
         4. OBV_slope_20: OBV的20周期线性回归斜率
+        
+        Args:
+            df: 包含Volume数据的DataFrame
+            
+        Returns:
+            添加了成交量特征的DataFrame
+            
+        注意：
+        - 处理成交量为0的情况
+        - OBV使用pandas-ta库计算
+        - 斜率计算使用scipy.stats.linregress
         """
         df = df.copy()
         
-        # 1. volume: 原始成交量（已存在）
-        df['volume'] = df['Volume']
+        if 'Volume' not in df.columns:
+            logger.warning("缺少Volume列，成交量特征使用NaN填充")
+            df['volume'] = np.nan
+            df['volume_zscore'] = np.nan
+            df['volume_change_1'] = np.nan
+            df['OBV_slope_20'] = np.nan
+            self.feature_names.extend(['volume', 'volume_zscore', 'volume_change_1', 'OBV_slope_20'])
+            return df
+        
+        # 1. volume: 原始成交量
+        df['volume'] = df['Volume'].copy()
         
         # 2. volume_zscore: 成交量Z-score
-        vol_mean = df['Volume'].rolling(window=20).mean()
-        vol_std = df['Volume'].rolling(window=20).std()
-        df['volume_zscore'] = (df['Volume'] - vol_mean) / vol_std
+        vol_mean = df['Volume'].rolling(window=20, min_periods=20).mean()
+        vol_std = df['Volume'].rolling(window=20, min_periods=20).std()
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['volume_zscore'] = (df['Volume'] - vol_mean) / vol_std
+        df['volume_zscore'] = df['volume_zscore'].replace([np.inf, -np.inf], np.nan)
         
         # 3. volume_change_1: 成交量变化率
+        # 使用pct_change，自动处理除零情况
         df['volume_change_1'] = df['Volume'].pct_change()
+        df['volume_change_1'] = df['volume_change_1'].replace([np.inf, -np.inf], np.nan)
         
-        # 4. OBV_slope_20: OBV斜率
-        obv = ta.obv(df['Close'], df['Volume'])
-        if obv is not None:
-            df['OBV_slope_20'] = obv.rolling(window=20).apply(
-                lambda x: stats.linregress(range(len(x)), x)[0] if len(x) == 20 else np.nan,
-                raw=True
-            )
-        else:
-            df['OBV_slope_20'] = np.nan
+        # 4. OBV_slope_20: OBV的20周期线性回归斜率
+        # 使用ta库计算OBV
+        obv_indicator = ta_volume.OnBalanceVolumeIndicator(
+            close=df['Close'], volume=df['Volume']
+        )
+        obv_series = obv_indicator.on_balance_volume()
         
+        def calculate_obv_slope(x):
+            """计算OBV的线性回归斜率"""
+            if len(x) < 20 or np.isnan(x).any():
+                return np.nan
+            try:
+                slope, _, _, _, _ = stats.linregress(range(len(x)), x)
+                return slope
+            except:
+                return np.nan
+        
+        df['OBV_slope_20'] = obv_series.rolling(window=20, min_periods=20).apply(
+            calculate_obv_slope, raw=True
+        )
+        
+        # 记录特征名称
         self.feature_names.extend(['volume', 'volume_zscore', 'volume_change_1', 'OBV_slope_20'])
+        
+        logger.debug(f"成交量特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -226,57 +372,88 @@ class FeatureCalculator:
         """
         任务1.2.5: 计算K线形态特征（7维）
         
-        特征：
-        1. pos_in_range_20: (close - LL20) / (HH20 - LL20)
-        2. dist_to_HH20_norm: (close - HH20) / close
-        3. dist_to_LL20_norm: (close - LL20) / close
-        4. body_ratio: |close - open| / (high - low)
-        5. upper_shadow_ratio: (high - max(open, close)) / (high - low)
-        6. lower_shadow_ratio: (min(open, close) - low) / (high - low)
+        特征说明：
+        1. pos_in_range_20: 在20周期范围内的相对位置 - (close - LL20) / (HH20 - LL20)
+        2. dist_to_HH20_norm: 到最高点的归一化距离 - (close - HH20) / close
+        3. dist_to_LL20_norm: 到最低点的归一化距离 - (close - LL20) / close
+        4. body_ratio: K线实体比例 - |close - open| / (high - low)
+        5. upper_shadow_ratio: 上影线比例 - (high - max(open, close)) / (high - low)
+        6. lower_shadow_ratio: 下影线比例 - (min(open, close) - low) / (high - low)
         7. FVG: 公允价值缺口
+        
+        Args:
+            df: 包含OHLC数据的DataFrame
+            
+        Returns:
+            添加了K线形态特征的DataFrame
+            
+        注意：
+        - 所有比例特征在[0,1]范围内
+        - 处理high=low的情况（避免除零）
+        - FVG特征见_calculate_fvg方法
         """
         df = df.copy()
         
         # 计算20周期高低点
-        hh20 = df['High'].rolling(window=20).max()
-        ll20 = df['Low'].rolling(window=20).min()
+        hh20 = df['High'].rolling(window=20, min_periods=20).max()
+        ll20 = df['Low'].rolling(window=20, min_periods=20).min()
         
         # 1. pos_in_range_20: 在20周期范围内的相对位置
         range_20 = hh20 - ll20
-        df['pos_in_range_20'] = np.where(
-            range_20 > 0,
-            (df['Close'] - ll20) / range_20,
-            0.5  # 如果范围为0，返回中间位置
-        )
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['pos_in_range_20'] = np.where(
+                range_20 > 0,
+                (df['Close'] - ll20) / range_20,
+                0.5  # 如果范围为0，返回中间位置
+            )
+        df['pos_in_range_20'] = df['pos_in_range_20'].replace([np.inf, -np.inf], np.nan)
         
         # 2. dist_to_HH20_norm: 到最高点的归一化距离
-        df['dist_to_HH20_norm'] = (df['Close'] - hh20) / df['Close']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['dist_to_HH20_norm'] = (df['Close'] - hh20) / df['Close']
+        df['dist_to_HH20_norm'] = df['dist_to_HH20_norm'].replace([np.inf, -np.inf], np.nan)
         
         # 3. dist_to_LL20_norm: 到最低点的归一化距离
-        df['dist_to_LL20_norm'] = (df['Close'] - ll20) / df['Close']
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['dist_to_LL20_norm'] = (df['Close'] - ll20) / df['Close']
+        df['dist_to_LL20_norm'] = df['dist_to_LL20_norm'].replace([np.inf, -np.inf], np.nan)
         
         # 计算K线范围（避免除零）
         candle_range = df['High'] - df['Low']
-        candle_range = candle_range.replace(0, np.nan)
+        # 将0替换为一个很小的数，避免除零
+        candle_range = candle_range.replace(0, 1e-10)
         
         # 4. body_ratio: 实体比例
-        df['body_ratio'] = np.abs(df['Close'] - df['Open']) / candle_range
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['body_ratio'] = np.abs(df['Close'] - df['Open']) / candle_range
+        df['body_ratio'] = df['body_ratio'].replace([np.inf, -np.inf], np.nan)
+        # 确保在[0,1]范围内
+        df['body_ratio'] = df['body_ratio'].clip(0, 1)
         
         # 5. upper_shadow_ratio: 上影线比例
         max_oc = df[['Open', 'Close']].max(axis=1)
-        df['upper_shadow_ratio'] = (df['High'] - max_oc) / candle_range
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['upper_shadow_ratio'] = (df['High'] - max_oc) / candle_range
+        df['upper_shadow_ratio'] = df['upper_shadow_ratio'].replace([np.inf, -np.inf], np.nan)
+        df['upper_shadow_ratio'] = df['upper_shadow_ratio'].clip(0, 1)
         
         # 6. lower_shadow_ratio: 下影线比例
         min_oc = df[['Open', 'Close']].min(axis=1)
-        df['lower_shadow_ratio'] = (min_oc - df['Low']) / candle_range
+        with np.errstate(divide='ignore', invalid='ignore'):
+            df['lower_shadow_ratio'] = (min_oc - df['Low']) / candle_range
+        df['lower_shadow_ratio'] = df['lower_shadow_ratio'].replace([np.inf, -np.inf], np.nan)
+        df['lower_shadow_ratio'] = df['lower_shadow_ratio'].clip(0, 1)
         
         # 7. FVG: 公允价值缺口（任务1.2.7）
         df['FVG'] = self._calculate_fvg(df)
         
+        # 记录特征名称
         self.feature_names.extend([
             'pos_in_range_20', 'dist_to_HH20_norm', 'dist_to_LL20_norm',
             'body_ratio', 'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'
         ])
+        
+        logger.debug(f"K线形态特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -284,23 +461,43 @@ class FeatureCalculator:
         """
         任务1.2.6: 计算时间周期特征（2维）
         
-        特征：
-        1. sin_tod: sin(2π * hour / 24)
-        2. cos_tod: cos(2π * hour / 24)
+        特征说明：
+        1. sin_tod: 时间的正弦编码 - sin(2π * hour / 24)
+        2. cos_tod: 时间的余弦编码 - cos(2π * hour / 24)
+        
+        Args:
+            df: 带时间索引的DataFrame
+            
+        Returns:
+            添加了时间周期特征的DataFrame
+            
+        注意：
+        - 使用正弦余弦编码保持时间的周期性
+        - 特征值在[-1, 1]范围内
+        - 能正确处理跨天情况
         """
         df = df.copy()
         
-        # 提取小时信息
-        if isinstance(df.index, pd.DatetimeIndex):
-            hour = df.index.hour + df.index.minute / 60.0
-        else:
-            hour = pd.to_datetime(df.index).hour + pd.to_datetime(df.index).minute / 60.0
+        # 提取小时信息（包括分钟的小数部分）
+        try:
+            if isinstance(df.index, pd.DatetimeIndex):
+                hour = df.index.hour + df.index.minute / 60.0
+            else:
+                # 尝试转换为DatetimeIndex
+                dt_index = pd.to_datetime(df.index)
+                hour = dt_index.hour + dt_index.minute / 60.0
+        except Exception as e:
+            logger.warning(f"无法提取时间信息: {e}，使用0填充")
+            hour = pd.Series(0.0, index=df.index)
         
         # 正弦余弦编码
         df['sin_tod'] = np.sin(2 * np.pi * hour / 24)
         df['cos_tod'] = np.cos(2 * np.pi * hour / 24)
         
+        # 记录特征名称
         self.feature_names.extend(['sin_tod', 'cos_tod'])
+        
+        logger.debug(f"时间周期特征计算完成: {len(df)}行数据")
         
         return df
     
@@ -308,32 +505,69 @@ class FeatureCalculator:
         """
         任务1.2.7: 计算FVG公允价值缺口
         
-        FVG检测逻辑：
-        - 多头FVG：第一根K线最高价 < 第三根K线最低价
-        - 空头FVG：第一根K线最低价 > 第三根K线最高价
+        FVG (Fair Value Gap) 是一种短期价格失衡，以三根K线的结构呈现：
         
+        多头FVG检测：
+        - 第一根K线的最高价 < 第三根K线的最低价
+        - 中间第二根K线强势上涨，形成可见缺口
+        
+        空头FVG检测：
+        - 第一根K线的最低价 > 第三根K线的最高价
+        - 中间第二根K线强势下跌，切穿价格区间
+        
+        Args:
+            df: 包含OHLC数据的DataFrame
+            
         Returns:
-            FVG特征列（正值=多头FVG，负值=空头FVG，0=无FVG）
+            FVG特征Series:
+            - 正值：多头FVG强度（缺口大小/当前价格）
+            - 负值：空头FVG强度
+            - 0：无FVG
+            
+        注意：
+        - 前两根K线返回0（无法计算）
+        - 缺口大小归一化到当前收盘价
+        - 处理了除零情况
         """
         fvg = pd.Series(0.0, index=df.index)
         
+        # 从第3根K线开始计算（索引2）
         for i in range(2, len(df)):
-            # 获取三根K线
-            high_1 = df['High'].iloc[i-2]
-            low_1 = df['Low'].iloc[i-2]
-            high_3 = df['High'].iloc[i]
-            low_3 = df['Low'].iloc[i]
-            close_current = df['Close'].iloc[i]
-            
-            # 检测多头FVG
-            if high_1 < low_3:
-                gap_size = (low_3 - high_1) / close_current
-                fvg.iloc[i] = gap_size
-            
-            # 检测空头FVG
-            elif low_1 > high_3:
-                gap_size = (low_1 - high_3) / close_current
-                fvg.iloc[i] = -gap_size
+            try:
+                # 获取三根K线的价格
+                high_1 = df['High'].iloc[i-2]  # 第一根K线最高价
+                low_1 = df['Low'].iloc[i-2]    # 第一根K线最低价
+                high_3 = df['High'].iloc[i]    # 第三根K线最高价
+                low_3 = df['Low'].iloc[i]      # 第三根K线最低价
+                close_current = df['Close'].iloc[i]  # 当前收盘价
+                
+                # 检查数据有效性
+                if np.isnan([high_1, low_1, high_3, low_3, close_current]).any():
+                    continue
+                if close_current <= 0:
+                    continue
+                
+                # 检测多头FVG（Bullish FVG）
+                if high_1 < low_3:
+                    # 存在向上缺口
+                    gap_size = low_3 - high_1
+                    fvg_strength = gap_size / close_current  # 归一化
+                    fvg.iloc[i] = fvg_strength
+                
+                # 检测空头FVG（Bearish FVG）
+                elif low_1 > high_3:
+                    # 存在向下缺口
+                    gap_size = low_1 - high_3
+                    fvg_strength = -gap_size / close_current  # 归一化，负值表示空头
+                    fvg.iloc[i] = fvg_strength
+                
+                # 否则无FVG，保持为0
+                
+            except Exception as e:
+                logger.debug(f"FVG计算出错 at index {i}: {e}")
+                continue
+        
+        logger.debug(f"FVG特征计算完成: 检测到{(fvg != 0).sum()}个FVG")
         
         return fvg
     
