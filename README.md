@@ -18,15 +18,19 @@ ai-trader-demo/
 │   ├── data/                 # 数据层
 │   │   ├── cleaning.py       # 数据清洗（任务1.1.1-1.1.4）
 │   │   ├── features.py       # 特征计算（任务1.2.1-1.2.7）
-│   │   └── normalization.py  # 特征归一化（任务1.3.1-1.3.3）
+│   │   ├── downloader.py     # 数据下载（任务5.1.1-5.1.2）
+│   │   └── storage.py        # 数据存储（任务5.1.3）
 │   ├── models/               # 模型层
 │   │   ├── ts2vec/          # TS2Vec模型
 │   │   ├── transformer/     # Transformer模型
 │   │   └── ppo/             # PPO模型
+│   ├── backtest/            # 回测模块
+│   │   ├── engine.py        # 回测引擎（任务5.2.1）
+│   │   ├── execution.py     # 订单执行（任务5.2.2-5.2.3）
+│   │   ├── strategy.py      # 策略接口
+│   │   └── recorder.py      # 结果记录（任务5.2.4）
 │   ├── features/            # 特征工程
-│   ├── environment/         # 交易环境
 │   ├── evaluation/          # 评估模块
-│   ├── training/            # 训练脚本
 │   └── utils/               # 工具函数
 ├── configs/                 # 配置文件
 │   └── config.yaml          # 主配置文件
@@ -213,6 +217,58 @@ scaler.save("models/scalers")
 scaler = FeatureScaler.load("models/scalers")
 ```
 
+### 数据下载与存储
+
+```python
+from src.data.downloader import DataDownloader, IncrementalUpdater
+from src.data.storage import DataStorage
+
+# 下载数据
+downloader = DataDownloader()
+data = downloader.download('AAPL', '2024-01-01', '2024-12-31', interval='5m')
+
+# 存储数据
+storage = DataStorage(base_path='data/raw')
+storage.save_parquet(data, 'AAPL', compression='snappy')
+
+# 加载数据
+loaded_data = storage.load_parquet('AAPL')
+
+# 增量更新
+updater = IncrementalUpdater(downloader)
+updated_data, new_records = updater.update('AAPL', loaded_data)
+```
+
+### 回测系统
+
+```python
+from src.backtest.engine import BacktestEngine
+from src.backtest.strategy import PPOStrategy
+from src.backtest.recorder import BacktestRecorder
+
+# 创建回测引擎
+engine = BacktestEngine(
+    initial_cash=100000.0,
+    commission=0.001,
+    slippage=0.0005
+)
+
+# 添加数据和策略
+engine.add_data(data, name='AAPL')
+engine.add_strategy(PPOStrategy, verbose=True)
+
+# 运行回测
+results = engine.run()
+
+# 获取结果
+strategy = results[0]
+backtest_results = engine.get_results(strategy)
+
+# 记录结果
+recorder = BacktestRecorder(output_dir='results/backtest')
+files = recorder.generate_full_report()
+```
+
 ## 🎯 开发进度
 
 ### 里程碑1: 数据基础设施 ✅ (已完成)
@@ -239,7 +295,17 @@ scaler = FeatureScaler.load("models/scalers")
 - [ ] 任务2.3.1-2.3.4: 训练流程
 - [ ] 任务2.4.1-2.4.5: 评估指标
 
-### 里程碑3-7: 待开发
+### 里程碑5: 测试层 ✅ (已完成)
+
+- [x] 任务5.1.1: 实现yfinance数据下载器
+- [x] 任务5.1.2: 实现数据增量更新
+- [x] 任务5.1.3: 实现数据存储（Parquet/HDF5）
+- [x] 任务5.2.1: 实现Backtrader回测引擎集成
+- [x] 任务5.2.2: 实现订单执行模拟
+- [x] 任务5.2.3: 实现滑点与手续费模拟
+- [x] 任务5.2.4: 实现回测结果记录
+
+### 里程碑3-4, 6-7: 待开发
 
 详见 [task.md](task.md) 文件
 
