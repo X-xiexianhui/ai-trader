@@ -1,13 +1,19 @@
 """
-数据清洗模块 - 处理OHLC数据的缺失值、异常值和时间对齐
+数据清洗模块 - 处理OHLC数据的缺失值和异常值
 
 本模块提供高质量的数据清洗功能，确保数据满足后续模型训练的要求。
 
 主要功能：
 1. 缺失值处理：前向填充、零填充、线性插值
 2. 异常值检测：3σ原则，区分尖峰和跳空
-3. 时间对齐：时区转换、交易时段过滤、重采样
-4. 质量验证：完整性、一致性、异常值、时间检查
+3. 质量验证：完整性、一致性、异常值、时间检查
+
+设计理念：
+- 极简原则：只处理数据质量问题，不做数据转换
+- 职责分离：
+  * IB Gateway负责：交易时段过滤（use_rth）、数据间隔保证（bar_size）、时区处理
+  * DataCleaner负责：缺失值修复、异常值检测、质量验证
+- 专注核心：让每个模块做好自己的事
 
 性能要求：处理10万条数据<1秒
 """
@@ -29,18 +35,22 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 class DataCleaner:
     """
-    数据清洗类，专门处理OHLC数据中的各种质量问题
+    数据清洗类，专门处理OHLC数据中的质量问题
     
-    主要功能：
+    核心功能：
     1. 缺失值处理（前向填充、零填充、线性插值）
-    2. 异常值检测与处理（3σ原则）
-    3. 时间对齐与时区处理
-    4. 数据质量验证
+    2. 异常值检测与处理（3σ原则，区分尖峰和跳空）
+    3. 数据质量验证（完整性、一致性、异常值、时间检查）
     
-    示例：
+    职责边界：
+    - 本模块负责：数据质量修复和验证
+    - IB Gateway负责：数据过滤、间隔保证、时区处理
+    
+    使用示例：
         >>> cleaner = DataCleaner(max_consecutive_missing=5)
-        >>> cleaned_df, report = cleaner.handle_missing_values(df)
-        >>> is_valid, validation_report = cleaner.validate_data_quality(cleaned_df)
+        >>> cleaned_df, report = cleaner.clean_pipeline(df)
+        >>> # 查看清洗报告
+        >>> cleaner.print_report_summary()
     """
     
     def __init__(self, max_consecutive_missing: int = 5, 
@@ -358,136 +368,6 @@ class DataCleaner:
         
         return df, report
     
-    def align_time_and_timezone(self, df: pd.DataFrame, 
-                               target_timezone: str = 'UTC',
-                               trading_hours: Optional[Tuple[int, int]] = None,
-                               interval_minutes: int = 5) -> Tuple[pd.DataFrame, Dict]:
-        """
-        处理时间对齐与时区
-        
-        任务1.1.3实现：
-        - 转换时区到UTC或指定时区
-        - 处理夏令时切换
-        - 过滤非交易时段数据
-        - 重采样确保严格5分钟间隔
-        
-        Args:
-            df: 带时间索引的DataFrame
-            target_timezone: 目标时区
-            trading_hours: 交易时段 (start_hour, end_hour)，None表示24小时
-            interval_minutes: K线间隔（分钟）
-            
-        Returns:
-            aligned_df: 时间对齐后的DataFrame
-            report: 时间处理报告
-            
-        Raises:
-            ValueError: 如果输入数据不合法或时区转换失败
-        """
-        start_time = time.time()
-        
-        # 参数验证
-        if df is None or df.empty:
-            raise ValueError("输入DataFrame不能为空")
-        if interval_minutes <= 0:
-            raise ValueError("interval_minutes必须>0")
-        
-        df = df.copy()
-        original_tz = str(df.index.tz) if hasattr(df.index, 'tz') and df.index.tz else 'None'
-        
-        report = {
-            'original_timezone': original_tz,
-            'target_timezone': target_timezone,
-            'rows_before': len(df),
-            'rows_after': 0,
-            'filtered_non_trading': 0,
-            'resampled_gaps': 0,
-            'irregular_intervals': 0,
-            'processing_time': 0
-        }
-        
-        # 1. 转换时区
-        try:
-            if not isinstance(df.index, pd.DatetimeIndex):
-                df.index = pd.to_datetime(df.index)
-            
-            # 如果没有时区信息，假设为UTC
-            if df.index.tz is None:
-                df.index = df.index.tz_localize('UTC')
-                logger.info("索引无时区信息，已设置为UTC")
-            
-            # 转换到目标时区
-            if str(df.index.tz) != target_timezone:
-                df.index = df.index.tz_convert(target_timezone)
-                logger.info(f"时区已从{original_tz}转换为{target_timezone}")
-                
-        except Exception as e:
-            logger.error(f"时区转换失败: {e}")
-            raise ValueError(f"时区转换失败: {e}")
-        
-        # 2. 过滤非交易时段
-        if trading_hours is not None:
-            start_hour, end_hour = trading_hours
-            hour_mask = (df.index.hour >= start_hour) & (df.index.hour < end_hour)
-            filtered_count = (~hour_mask).sum()
-            df = df[hour_mask]
-            report['filtered_non_trading'] = int(filtered_count)
-        
-        # 3. 重采样确保严格间隔
-        expected_freq = f'{interval_minutes}T'
-        
-        # 检查实际间隔
-        if len(df) > 1:
-            time_diffs = df.index.to_series().diff()
-            expected_diff = pd.Timedelta(minutes=interval_minutes)
-            
-            # 允许±10秒的容差
-            tolerance = pd.Timedelta(seconds=10)
-            irregular_mask = np.abs(time_diffs - expected_diff) > tolerance
-            irregular_mask = irregular_mask.fillna(False)
-            
-            report['irregular_intervals'] = int(irregular_mask.sum())
-            
-            if report['irregular_intervals'] > 0:
-                logger.info(f"发现{report['irregular_intervals']}个不规则时间间隔，开始重采样")
-                
-                # 构建聚合字典（只包含存在的列）
-                agg_dict = {
-                    'Open': 'first',
-                    'High': 'max',
-                    'Low': 'min',
-                    'Close': 'last'
-                }
-                if 'Volume' in df.columns:
-                    agg_dict['Volume'] = 'sum'
-                
-                # 重采样到规则间隔
-                try:
-                    df_resampled = df.resample(expected_freq).agg(agg_dict)
-                    
-                    # 删除全为NaN的行（空K线）
-                    df_resampled = df_resampled.dropna(subset=['Close'])
-                    
-                    report['resampled_gaps'] = len(df_resampled) - len(df)
-                    df = df_resampled
-                    
-                    logger.info(f"重采样完成，行数变化: {report['resampled_gaps']}")
-                except Exception as e:
-                    logger.error(f"重采样失败: {e}")
-                    raise ValueError(f"重采样失败: {e}")
-        
-        report['rows_after'] = len(df)
-        report['processing_time'] = time.time() - start_time
-        
-        self.cleaning_report['time_alignment'] = report
-        logger.info(
-            f"时间对齐完成: "
-            f"从{report['rows_before']}行到{report['rows_after']}行, "
-            f"过滤非交易时段{report['filtered_non_trading']}行, "
-            f"耗时{report['processing_time']:.3f}秒"
-        )
-        
-        return df, report
     
     def validate_data_quality(self, df: pd.DataFrame) -> Tuple[bool, Dict]:
         """
@@ -710,19 +590,20 @@ class DataCleaner:
         
         return report['is_valid'], report
     
-    def clean_pipeline(self, df: pd.DataFrame, 
-                      target_timezone: str = 'UTC',
-                      trading_hours: Optional[Tuple[int, int]] = None,
+    def clean_pipeline(self, df: pd.DataFrame,
                       sigma_threshold: float = None) -> Tuple[pd.DataFrame, Dict]:
         """
         完整的数据清洗流程
         
-        按顺序执行：缺失值处理 → 异常值处理 → 时间对齐 → 质量验证
+        按顺序执行：缺失值处理 → 异常值处理 → 质量验证
+        
+        注意：
+        - 时区处理已移除（在数据加载时处理，见ib_historical_data.py）
+        - 交易时段筛选已移除（使用IB的use_rth参数）
+        - 重采样功能已移除（IB保证数据间隔严格）
         
         Args:
             df: 原始OHLC DataFrame
-            target_timezone: 目标时区
-            trading_hours: 交易时段 (start_hour, end_hour)
             sigma_threshold: 异常值检测阈值，None则使用初始化时的值
             
         Returns:
@@ -737,22 +618,17 @@ class DataCleaner:
         try:
             # 1. 缺失值处理
             logger.info("-" * 60)
-            logger.info("步骤1/4: 缺失值处理")
+            logger.info("步骤1/3: 缺失值处理")
             df, _ = self.handle_missing_values(df)
             
             # 2. 异常值处理
             logger.info("-" * 60)
-            logger.info("步骤2/4: 异常值检测与处理")
+            logger.info("步骤2/3: 异常值检测与处理")
             df, _ = self.detect_and_handle_outliers(df, sigma_threshold)
             
-            # 3. 时间对齐
+            # 3. 质量验证
             logger.info("-" * 60)
-            logger.info("步骤3/4: 时间对齐与时区处理")
-            df, _ = self.align_time_and_timezone(df, target_timezone, trading_hours)
-            
-            # 4. 质量验证
-            logger.info("-" * 60)
-            logger.info("步骤4/4: 数据质量验证")
+            logger.info("步骤3/3: 数据质量验证")
             is_valid, _ = self.validate_data_quality(df)
             
             # 生成完整报告
@@ -862,12 +738,6 @@ class DataCleaner:
             print(f"  修正尖峰: {ol['spike_outliers']}个")
             print(f"  保留跳空: {ol['gap_outliers']}个")
         
-        if 'time_alignment' in self.cleaning_report:
-            ta = self.cleaning_report['time_alignment']
-            print(f"\n【时间对齐】")
-            print(f"  时区转换: {ta['original_timezone']} → {ta['target_timezone']}")
-            print(f"  行数变化: {ta['rows_before']} → {ta['rows_after']}")
-            print(f"  过滤非交易时段: {ta['filtered_non_trading']}行")
         
         if 'validation' in self.cleaning_report:
             vd = self.cleaning_report['validation']

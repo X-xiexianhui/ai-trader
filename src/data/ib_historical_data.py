@@ -346,6 +346,159 @@ class IBHistoricalDataDownloader:
         
         return limits.get(bar_size, 30)
     
+    def download_historical_data_streaming(
+        self,
+        contract: Contract,
+        start_date: datetime,
+        end_date: datetime,
+        bar_size: str = '5m',
+        what_to_show: str = 'TRADES',
+        use_rth: bool = False,
+        save_path: Optional[str] = None,
+        chunk_days: Optional[int] = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        流式下载历史数据，边下载边保存
+        适合下载长期历史数据，避免内存溢出
+        
+        Args:
+            contract: 合约对象
+            start_date: 开始日期
+            end_date: 结束日期
+            bar_size: K线周期
+            what_to_show: 数据类型
+            use_rth: 是否只使用常规交易时间
+            save_path: 保存路径（如果提供，会边下载边保存）
+            chunk_days: 每次下载的天数（None则自动根据bar_size确定）
+        
+        Returns:
+            pd.DataFrame: 完整的历史数据（如果内存允许）
+        """
+        if not self.connector.is_connected:
+            logger.error("未连接到IB Gateway")
+            return None
+        
+        try:
+            # 对于连续期货合约的特殊处理
+            if contract.secType == 'CONTFUT':
+                logger.warning("连续期货合约不支持流式下载，使用标准方法")
+                return self.download_historical_data_range(
+                    contract=contract,
+                    start_date=start_date,
+                    end_date=end_date,
+                    bar_size=bar_size,
+                    what_to_show=what_to_show,
+                    use_rth=use_rth
+                )
+            
+            # 确定每次下载的天数
+            if chunk_days is None:
+                chunk_days = self._get_max_days_per_request(bar_size)
+            
+            logger.info(f"开始流式下载历史数据: {contract.symbol}")
+            logger.info(f"时间范围: {start_date} 到 {end_date}")
+            logger.info(f"分块大小: {chunk_days} 天")
+            
+            # 准备保存文件
+            import os
+            file_exists = False
+            if save_path:
+                file_exists = os.path.exists(save_path)
+                logger.info(f"数据将保存到: {save_path}")
+            
+            all_data = []
+            current_end = end_date
+            chunk_count = 0
+            total_records = 0
+            
+            # 移除时区信息
+            if start_date.tzinfo is not None:
+                start_date = start_date.replace(tzinfo=None)
+            if current_end.tzinfo is not None:
+                current_end = current_end.replace(tzinfo=None)
+            
+            while current_end > start_date:
+                chunk_count += 1
+                
+                # 计算本次请求的持续时间
+                days_to_request = min(chunk_days, (current_end - start_date).days)
+                if days_to_request <= 0:
+                    break
+                
+                duration = f"{days_to_request} D"
+                
+                logger.info(f"[块 {chunk_count}] 下载数据: 结束于 {current_end}, 持续 {duration}")
+                
+                # 下载数据块
+                df_chunk = self.download_historical_data(
+                    contract=contract,
+                    end_datetime=current_end,
+                    duration=duration,
+                    bar_size=bar_size,
+                    what_to_show=what_to_show,
+                    use_rth=use_rth
+                )
+                
+                if df_chunk is not None and not df_chunk.empty:
+                    # 过滤到指定日期范围
+                    df_chunk = df_chunk[
+                        (df_chunk['date'] >= start_date) &
+                        (df_chunk['date'] <= current_end)
+                    ]
+                    
+                    chunk_records = len(df_chunk)
+                    total_records += chunk_records
+                    logger.info(f"[块 {chunk_count}] 获取 {chunk_records} 条记录，累计 {total_records} 条")
+                    
+                    # 立即保存到文件
+                    if save_path:
+                        mode = 'a' if file_exists else 'w'
+                        header = not file_exists
+                        
+                        if save_path.endswith('.csv'):
+                            df_chunk.to_csv(save_path, mode=mode, header=header, index=False)
+                        elif save_path.endswith('.parquet'):
+                            # Parquet不支持追加，需要特殊处理
+                            if file_exists:
+                                # 读取现有数据，合并后保存
+                                existing_df = pd.read_parquet(save_path)
+                                combined_df = pd.concat([existing_df, df_chunk], ignore_index=True)
+                                combined_df.to_parquet(save_path, index=False)
+                            else:
+                                df_chunk.to_parquet(save_path, index=False)
+                        
+                        file_exists = True
+                        logger.info(f"[块 {chunk_count}] 数据已保存")
+                    
+                    # 保存到内存（可选）
+                    all_data.append(df_chunk)
+                else:
+                    logger.warning(f"[块 {chunk_count}] 未获取到数据")
+                
+                # 更新下一次请求的结束时间
+                current_end = current_end - timedelta(days=days_to_request)
+                
+                # 避免请求过快
+                time.sleep(1)
+            
+            logger.info(f"流式下载完成！共 {chunk_count} 个块，{total_records} 条记录")
+            
+            # 如果需要返回完整数据
+            if all_data:
+                result = pd.concat(all_data, ignore_index=True)
+                result = result.drop_duplicates(subset=['date'])
+                result = result.sort_values('date').reset_index(drop=True)
+                return result
+            else:
+                logger.warning("未获取到任何数据")
+                return None
+            
+        except Exception as e:
+            logger.error(f"流式下载失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+    
     def save_to_csv(
         self,
         df: pd.DataFrame,

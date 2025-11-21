@@ -32,11 +32,13 @@ class TrainingDataPipeline:
     1. 加载原始数据
     2. 数据清洗
     3. 特征计算
-    4. 特征归一化
+    4. 划分数据集
     5. 生成TS2Vec embedding
     6. 特征融合
     7. 创建序列
-    8. 划分数据集
+    
+    注意：特征归一化应在特征计算阶段完成（见training/process_mes_features.py），
+    本管道不再进行归一化，避免重复归一化。
     """
     
     def __init__(self,
@@ -86,33 +88,44 @@ class TrainingDataPipeline:
                 train_ratio: float = 0.7,
                 val_ratio: float = 0.15,
                 test_ratio: float = 0.15,
-                target_column: Optional[str] = None) -> Dict[str, Tuple]:
+                target_column: Optional[str] = None,
+                features_already_normalized: bool = False) -> Dict[str, Tuple]:
         """
         完整的数据处理流程
         
         Args:
-            raw_data: 原始OHLC数据
+            raw_data: 原始OHLC数据或已归一化的特征数据
             train_ratio: 训练集比例
             val_ratio: 验证集比例
             test_ratio: 测试集比例
             target_column: 目标列名（用于生成标签）
+            features_already_normalized: 特征是否已归一化（默认False）
             
         Returns:
             包含train/val/test数据集的字典
+            
+        注意：
+            如果features_already_normalized=True，则跳过数据清洗和特征计算步骤，
+            直接使用输入数据（假设已经过process_mes_features.py处理）
         """
         logger.info("=" * 50)
         logger.info("开始训练数据管道处理")
         logger.info(f"原始数据形状: {raw_data.shape}")
         
-        # 1. 数据清洗
-        logger.info("\n步骤1: 数据清洗")
-        cleaned_data = self._clean_data(raw_data)
-        logger.info(f"清洗后数据形状: {cleaned_data.shape}")
-        
-        # 2. 特征计算
-        logger.info("\n步骤2: 特征计算")
-        features_df = self._calculate_features(cleaned_data)
-        logger.info(f"特征数据形状: {features_df.shape}")
+        if features_already_normalized:
+            logger.info("特征已归一化，跳过清洗和特征计算步骤")
+            features_df = raw_data
+            cleaned_data = raw_data  # 用于生成标签
+        else:
+            # 1. 数据清洗
+            logger.info("\n步骤1: 数据清洗")
+            cleaned_data = self._clean_data(raw_data)
+            logger.info(f"清洗后数据形状: {cleaned_data.shape}")
+            
+            # 2. 特征计算
+            logger.info("\n步骤2: 特征计算")
+            features_df = self._calculate_features(cleaned_data)
+            logger.info(f"特征数据形状: {features_df.shape}")
         
         # 3. 生成标签（如果需要）
         labels = None
@@ -121,31 +134,27 @@ class TrainingDataPipeline:
             labels = self._generate_labels(cleaned_data, target_column)
             logger.info(f"标签形状: {labels.shape}")
         
-        # 4. 划分数据集（在归一化之前）
+        # 4. 划分数据集
         logger.info("\n步骤4: 划分数据集")
         splits = self._split_data(
             cleaned_data, features_df, labels,
             train_ratio, val_ratio, test_ratio
         )
         
-        # 5. 特征归一化（仅使用训练集统计量）
-        logger.info("\n步骤5: 特征归一化")
-        normalized_splits = self._normalize_features(splits)
-        
-        # 6. 生成TS2Vec embeddings
+        # 5. 生成TS2Vec embeddings
         if self.embedding_generator is not None:
-            logger.info("\n步骤6: 生成TS2Vec embeddings")
-            embedded_splits = self._generate_embeddings(normalized_splits)
+            logger.info("\n步骤5: 生成TS2Vec embeddings")
+            embedded_splits = self._generate_embeddings(splits)
         else:
-            logger.info("\n步骤6: 跳过TS2Vec embeddings（未提供模型）")
-            embedded_splits = normalized_splits
+            logger.info("\n步骤5: 跳过TS2Vec embeddings（未提供模型）")
+            embedded_splits = splits
         
-        # 7. 特征融合
-        logger.info("\n步骤7: 特征融合")
+        # 6. 特征融合
+        logger.info("\n步骤6: 特征融合")
         fused_splits = self._fuse_features(embedded_splits)
         
-        # 8. 构建序列
-        logger.info("\n步骤8: 构建序列")
+        # 7. 构建序列
+        logger.info("\n步骤7: 构建序列")
         final_splits = self._build_sequences(fused_splits)
         
         logger.info("\n" + "=" * 50)
@@ -249,24 +258,6 @@ class TrainingDataPipeline:
         
         return splits
     
-    def _normalize_features(self, splits: Dict) -> Dict:
-        """特征归一化（仅使用训练集统计量）"""
-        # 在训练集上拟合scaler
-        train_features = splits['train']['features']
-        self.feature_scaler.fit(train_features)
-        
-        # 转换所有数据集
-        normalized_splits = {}
-        for split_name, split_data in splits.items():
-            normalized_features = self.feature_scaler.transform(split_data['features'])
-            
-            normalized_splits[split_name] = {
-                'ohlc': split_data['ohlc'],
-                'features': normalized_features,
-                'labels': split_data['labels']
-            }
-        
-        return normalized_splits
     
     def _generate_embeddings(self, splits: Dict) -> Dict:
         """生成TS2Vec embeddings"""
@@ -314,14 +305,19 @@ class TrainingDataPipeline:
         fused_splits = {}
         
         for split_name, split_data in splits.items():
-            if split_data['embeddings'] is None:
+            if 'embeddings' not in split_data or split_data['embeddings'] is None:
                 # 没有embeddings，直接使用手工特征
-                fused_features = torch.FloatTensor(split_data['features'].values)
+                features = split_data['features']
+                if isinstance(features, pd.DataFrame):
+                    fused_features = torch.FloatTensor(features.values)
+                else:
+                    fused_features = torch.FloatTensor(features)
+                labels = split_data.get('labels')
             else:
                 # 对齐长度
                 embeddings = split_data['embeddings']
                 features = split_data['features']
-                labels = split_data['labels']
+                labels = split_data.get('labels')
                 
                 # embeddings可能是3D的，需要平均池化
                 if len(embeddings.shape) == 3:
@@ -330,18 +326,26 @@ class TrainingDataPipeline:
                 # 对齐长度
                 min_len = min(len(embeddings), len(features))
                 embeddings = embeddings[:min_len]
-                features_tensor = torch.FloatTensor(features.iloc[:min_len].values)
+                
+                if isinstance(features, pd.DataFrame):
+                    features_tensor = torch.FloatTensor(features.iloc[:min_len].values)
+                else:
+                    features_tensor = torch.FloatTensor(features[:min_len])
                 
                 # 融合
                 fused_features = self.feature_fusion.fuse(embeddings, features_tensor)
                 
                 # 对齐标签
                 if labels is not None:
-                    labels = labels.iloc[:min_len]
+                    if isinstance(labels, pd.Series):
+                        labels = labels.iloc[:min_len]
+                    else:
+                        labels = labels[:min_len]
             
             fused_splits[split_name] = {
                 'features': fused_features,
-                'labels': torch.FloatTensor(labels.values) if labels is not None else None
+                'labels': torch.FloatTensor(labels.values) if isinstance(labels, pd.Series) else
+                         (torch.FloatTensor(labels) if labels is not None else None)
             }
             
             logger.info(f"{split_name}集融合特征形状: {fused_features.shape}")
