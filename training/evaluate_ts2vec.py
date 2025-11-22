@@ -225,6 +225,19 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     
     # 准备线性探测数据（从测试集中划分）
     n_test = len(test_dataset)
+    n_labels = len(labels)
+    
+    # 确保标签数量匹配
+    if n_test != n_labels:
+        logger.warning(f"数据集样本数({n_test})与标签数({n_labels})不匹配，调整标签")
+        # 截取或填充标签以匹配数据集大小
+        if n_labels > n_test:
+            labels = labels[:n_test]
+        else:
+            # 如果标签不够，使用最后一个标签填充
+            labels = np.pad(labels, (0, n_test - n_labels), mode='edge')
+        n_labels = len(labels)
+    
     n_train_probe = int(0.7 * n_test)
     
     # 获取数据
@@ -244,6 +257,8 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     
     train_probe_labels = torch.tensor(labels[:n_train_probe])
     test_probe_labels = torch.tensor(labels[n_train_probe:n_test])
+    
+    logger.info(f"线性探测 - 训练样本: {len(train_probe_data)}, 测试样本: {len(test_probe_data)}")
     
     linear_probing_results = evaluator.linear_probing(
         train_probe_data,
@@ -491,10 +506,29 @@ def main():
     eval_time = (end_time - start_time).total_seconds()
     logger.info(f"\n评估耗时: {eval_time:.2f} 秒")
     
-    # 保存完整结果为JSON
+    # 保存完整结果为JSON（转换numpy类型）
+    def convert_to_serializable(obj):
+        """递归转换numpy类型为Python原生类型"""
+        if isinstance(obj, dict):
+            return {k: convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_serializable(item) for item in obj]
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return obj
+    
+    results_serializable = convert_to_serializable(results)
+    
     results_json_path = 'training/output/ts2vec_evaluation_results.json'
     with open(results_json_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
+        json.dump(results_serializable, f, indent=2, ensure_ascii=False)
     logger.info(f"评估结果已保存: {results_json_path}")
     
     # 打印总结
