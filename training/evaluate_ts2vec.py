@@ -29,8 +29,9 @@ from src.utils.logger import setup_logger
 # 设置日志
 logger = setup_logger(
     name='ts2vec_evaluation',
-    log_file='logs/ts2vec_evaluation.log',
-    level=logging.INFO
+    log_level='INFO',
+    log_dir='logs',
+    log_file='ts2vec_evaluation.log'
 )
 
 
@@ -76,39 +77,50 @@ def load_model(model_path: str, config: dict, device: str) -> TS2VecModel:
 def load_data(data_path: str) -> pd.DataFrame:
     """加载数据"""
     logger.info(f"加载数据: {data_path}")
-    df = pd.read_csv(data_path, parse_dates=['timestamp'])
-    df.set_index('timestamp', inplace=True)
+    df = pd.read_csv(data_path, parse_dates=['date'])
+    df.set_index('date', inplace=True)
+    
+    # 重命名列为小写
+    df.rename(columns={
+        'Open': 'open',
+        'High': 'high',
+        'Low': 'low',
+        'Close': 'close',
+        'Volume': 'volume'
+    }, inplace=True)
+    
     logger.info(f"数据形状: {df.shape}")
+    logger.info(f"数据列: {df.columns.tolist()}")
     return df
 
 
-def prepare_evaluation_data(df: pd.DataFrame, config: dict) -> tuple:
+def prepare_evaluation_data(test_df: pd.DataFrame, config: dict):
     """
     准备评估数据
     
     Args:
-        df: 原始数据
+        test_df: 测试数据
         config: 配置字典
         
     Returns:
-        (dataset, test_indices)
+        test_dataset
     """
     logger.info("准备评估数据...")
     
     # 提取OHLC数据
     ohlc_columns = ['open', 'high', 'low', 'close']
-    ohlc_data = df[ohlc_columns].values
+    test_ohlc = test_df[ohlc_columns].values
     
     # 检查数据质量
-    if np.isnan(ohlc_data).any():
-        logger.warning("数据中存在NaN值，将进行填充")
-        ohlc_data = pd.DataFrame(ohlc_data).fillna(method='ffill').fillna(method='bfill').values
+    if np.isnan(test_ohlc).any():
+        logger.warning("测试集中存在NaN值，将进行填充")
+        test_ohlc = pd.DataFrame(test_ohlc).fillna(method='ffill').fillna(method='bfill').values
     
-    # 创建数据集
+    # 创建测试数据集
     ts2vec_config = config['ts2vec']
     
-    dataset = TS2VecDataset(
-        data=ohlc_data,
+    test_dataset = TS2VecDataset(
+        data=test_ohlc,
         window_length=ts2vec_config['window_length'],
         stride=1,
         augmentation_params={
@@ -119,14 +131,10 @@ def prepare_evaluation_data(df: pd.DataFrame, config: dict) -> tuple:
         }
     )
     
-    # 使用后30%作为测试集
-    total_size = len(dataset)
-    test_start = int(0.7 * total_size)
-    test_indices = list(range(test_start, total_size))
+    logger.info(f"测试集样本数: {len(test_dataset)}")
+    logger.info(f"测试集时间范围: {test_df.index[0]} 到 {test_df.index[-1]}")
     
-    logger.info(f"测试集样本数: {len(test_indices)}")
-    
-    return dataset, test_indices
+    return test_dataset
 
 
 def create_labels_for_probing(df: pd.DataFrame, window_length: int, stride: int) -> np.ndarray:
@@ -167,8 +175,7 @@ def create_labels_for_probing(df: pd.DataFrame, window_length: int, stride: int)
 
 
 def evaluate_model_comprehensive(model: TS2VecModel,
-                                 dataset,
-                                 test_indices: list,
+                                 test_dataset,
                                  labels: np.ndarray,
                                  config: dict,
                                  device: str,
@@ -178,8 +185,7 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     
     Args:
         model: 训练好的模型
-        dataset: 完整数据集
-        test_indices: 测试集索引
+        test_dataset: 测试数据集
         labels: 标签数组
         config: 配置字典
         device: 计算设备
@@ -199,7 +205,6 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     evaluator = TS2VecEvaluator(model, device=device)
     
     # 创建测试数据加载器
-    test_dataset = Subset(dataset, test_indices)
     test_loader = OptimizedDataLoader.create_loader(
         test_dataset,
         batch_size=config['ts2vec']['batch_size'],
@@ -218,33 +223,27 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     # 2. 线性探测评估
     logger.info("\n2. 线性探测评估...")
     
-    # 准备线性探测数据
-    test_labels = labels[test_indices]
-    
-    # 划分训练和测试（从测试集中再划分）
-    n_test = len(test_indices)
+    # 准备线性探测数据（从测试集中划分）
+    n_test = len(test_dataset)
     n_train_probe = int(0.7 * n_test)
-    
-    train_probe_indices = test_indices[:n_train_probe]
-    test_probe_indices = test_indices[n_train_probe:]
     
     # 获取数据
     train_probe_data = []
     test_probe_data = []
     
-    for idx in train_probe_indices:
-        x_i, _ = dataset[idx]
+    for idx in range(n_train_probe):
+        x_i, _ = test_dataset[idx]
         train_probe_data.append(x_i)
     
-    for idx in test_probe_indices:
-        x_i, _ = dataset[idx]
+    for idx in range(n_train_probe, n_test):
+        x_i, _ = test_dataset[idx]
         test_probe_data.append(x_i)
     
     train_probe_data = torch.stack(train_probe_data)
     test_probe_data = torch.stack(test_probe_data)
     
-    train_probe_labels = torch.tensor(labels[train_probe_indices])
-    test_probe_labels = torch.tensor(labels[test_probe_indices])
+    train_probe_labels = torch.tensor(labels[:n_train_probe])
+    test_probe_labels = torch.tensor(labels[n_train_probe:n_test])
     
     linear_probing_results = evaluator.linear_probing(
         train_probe_data,
@@ -258,12 +257,12 @@ def evaluate_model_comprehensive(model: TS2VecModel,
     logger.info("\n3. 聚类质量评估...")
     
     # 采样一部分数据进行聚类
-    sample_size = min(1000, len(test_indices))
-    sample_indices = np.random.choice(test_indices, sample_size, replace=False)
+    sample_size = min(1000, len(test_dataset))
+    sample_indices = np.random.choice(len(test_dataset), sample_size, replace=False)
     
     sample_data = []
     for idx in sample_indices:
-        x_i, _ = dataset[idx]
+        x_i, _ = test_dataset[idx]
         sample_data.append(x_i)
     
     sample_data = torch.stack(sample_data)
@@ -457,19 +456,23 @@ def main():
     
     model = load_model(model_path, config, device)
     
-    # 加载数据
-    data_path = os.path.join(
-        config['data']['processed_data_dir'],
-        'MES_cleaned_5m.csv'
-    )
-    df = load_data(data_path)
+    # 加载预划分的测试集
+    data_dir = config['data']['processed_data_dir']
+    test_path = os.path.join(data_dir, 'MES_test.csv')
+    
+    if not os.path.exists(test_path):
+        logger.error("未找到测试集文件!")
+        logger.error("请先运行: python training/split_dataset.py")
+        return
+    
+    test_df = load_data(test_path)
     
     # 准备评估数据
-    dataset, test_indices = prepare_evaluation_data(df, config)
+    test_dataset = prepare_evaluation_data(test_df, config)
     
     # 创建标签
     labels = create_labels_for_probing(
-        df,
+        test_df,
         config['ts2vec']['window_length'],
         stride=1
     )
@@ -478,8 +481,7 @@ def main():
     start_time = datetime.now()
     results = evaluate_model_comprehensive(
         model,
-        dataset,
-        test_indices,
+        test_dataset,
         labels,
         config,
         device

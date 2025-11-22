@@ -57,15 +57,6 @@ def load_data(data_path: str) -> pd.DataFrame:
     # 设置时间戳为索引
     df.set_index('date', inplace=True)
     
-    # 重命名列为小写
-    df.rename(columns={
-        'Open': 'open',
-        'High': 'high',
-        'Low': 'low',
-        'Close': 'close',
-        'Volume': 'volume'
-    }, inplace=True)
-    
     logger.info(f"数据形状: {df.shape}")
     logger.info(f"数据列: {df.columns.tolist()}")
     logger.info(f"数据时间范围: {df.index[0]} 到 {df.index[-1]}")
@@ -73,37 +64,33 @@ def load_data(data_path: str) -> pd.DataFrame:
     return df
 
 
-def prepare_ts2vec_data(df: pd.DataFrame, config: dict) -> tuple:
+def prepare_ts2vec_data(train_df: pd.DataFrame, val_df: pd.DataFrame, config: dict) -> tuple:
     """
     准备TS2Vec训练数据
     
     Args:
-        df: 原始数据
+        train_df: 训练数据
+        val_df: 验证数据
         config: 配置字典
         
     Returns:
-        (train_dataset, val_dataset, test_dataset)
+        (train_dataset, val_dataset)
     """
     logger.info("准备TS2Vec训练数据...")
     
-    # 提取OHLC数据
-    ohlc_columns = ['open', 'high', 'low', 'close']
-    ohlc_data = df[ohlc_columns].values
-    
-    logger.info(f"OHLC数据形状: {ohlc_data.shape}")
-    
-    # 检查数据质量
-    if np.isnan(ohlc_data).any():
-        logger.warning("数据中存在NaN值，将进行填充")
-        ohlc_data = pd.DataFrame(ohlc_data).fillna(method='ffill').fillna(method='bfill').values
-    
-    # 创建TS2Vec数据集
     ts2vec_config = config['ts2vec']
     
-    dataset = TS2VecDataset(
-        data=ohlc_data,
+    # 处理训练集
+    logger.info("处理训练集...")
+    train_ohlc = train_df[['open', 'high', 'low', 'close']].values
+    if np.isnan(train_ohlc).any():
+        logger.warning("训练集中存在NaN值，将进行填充")
+        train_ohlc = pd.DataFrame(train_ohlc).fillna(method='ffill').fillna(method='bfill').values
+    
+    train_dataset = TS2VecDataset(
+        data=train_ohlc,
         window_length=ts2vec_config['window_length'],
-        stride=1,  # 使用步长1以获得更多训练样本
+        stride=1,
         augmentation_params={
             'aug_types': ['masking', 'warping', 'scaling'],
             'masking_ratio': ts2vec_config['masking_ratio'],
@@ -112,25 +99,29 @@ def prepare_ts2vec_data(df: pd.DataFrame, config: dict) -> tuple:
         }
     )
     
-    logger.info(f"总样本数: {len(dataset)}")
+    # 处理验证集
+    logger.info("处理验证集...")
+    val_ohlc = val_df[['open', 'high', 'low', 'close']].values
+    if np.isnan(val_ohlc).any():
+        logger.warning("验证集中存在NaN值，将进行填充")
+        val_ohlc = pd.DataFrame(val_ohlc).fillna(method='ffill').fillna(method='bfill').values
     
-    # 划分训练集、验证集、测试集 (70%, 15%, 15%)
-    total_size = len(dataset)
-    train_size = int(0.7 * total_size)
-    val_size = int(0.15 * total_size)
-    test_size = total_size - train_size - val_size
-    
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42)
+    val_dataset = TS2VecDataset(
+        data=val_ohlc,
+        window_length=ts2vec_config['window_length'],
+        stride=1,
+        augmentation_params={
+            'aug_types': ['masking', 'warping', 'scaling'],
+            'masking_ratio': ts2vec_config['masking_ratio'],
+            'warp_ratio': ts2vec_config['time_warp_ratio'],
+            'scale_range': ts2vec_config['magnitude_scale_range']
+        }
     )
     
     logger.info(f"训练集: {len(train_dataset)} 样本")
     logger.info(f"验证集: {len(val_dataset)} 样本")
-    logger.info(f"测试集: {len(test_dataset)} 样本")
     
-    return train_dataset, val_dataset, test_dataset
+    return train_dataset, val_dataset
 
 
 def create_model(config: dict, device: str) -> TS2VecModel:
@@ -350,15 +341,22 @@ def main():
         logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
         logger.info(f"显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
     
-    # 加载数据
-    data_path = os.path.join(
-        config['data']['processed_data_dir'],
-        'MES_cleaned_5m.csv'
-    )
-    df = load_data(data_path)
+    # 加载预划分的数据集
+    data_dir = config['data']['processed_data_dir']
+    
+    train_path = os.path.join(data_dir, 'MES_train.csv')
+    val_path = os.path.join(data_dir, 'MES_val.csv')
+    
+    if not os.path.exists(train_path) or not os.path.exists(val_path):
+        logger.error("未找到预划分的数据集!")
+        logger.error("请先运行: python training/split_dataset.py")
+        return
+    
+    train_df = load_data(train_path)
+    val_df = load_data(val_path)
     
     # 准备数据
-    train_dataset, val_dataset, test_dataset = prepare_ts2vec_data(df, config)
+    train_dataset, val_dataset = prepare_ts2vec_data(train_df, val_df, config)
     
     # 创建模型
     model = create_model(config, device)
@@ -374,8 +372,9 @@ def main():
     # 绘制训练历史
     plot_training_history(history)
     
-    # 评估模型
-    metrics = evaluate_model(model, test_dataset, config, device)
+    # 注意：最终评估应该使用独立的评估脚本和测试集
+    # 这里不再评估测试集，避免数据泄露
+    logger.info("训练完成！使用 training/evaluate_ts2vec.py 进行最终评估")
     
     # 保存训练报告
     report = {
@@ -385,13 +384,11 @@ def main():
         'data_info': {
             'train_samples': len(train_dataset),
             'val_samples': len(val_dataset),
-            'test_samples': len(test_dataset),
-            'data_shape': df.shape,
-            'time_range': f"{df.index[0]} to {df.index[-1]}"
+            'train_time_range': f"{train_df.index[0]} to {train_df.index[-1]}",
+            'val_time_range': f"{val_df.index[0]} to {val_df.index[-1]}"
         },
         'final_metrics': {
-            'best_val_loss': min(history['val_loss']),
-            'test_loss': metrics['test_loss']
+            'best_val_loss': min(history['val_loss'])
         },
         'training_history': {
             'train_loss': [float(x) for x in history['train_loss']],
@@ -419,12 +416,10 @@ def main():
         f.write("数据信息:\n")
         f.write(f"  训练样本: {len(train_dataset)}\n")
         f.write(f"  验证样本: {len(val_dataset)}\n")
-        f.write(f"  测试样本: {len(test_dataset)}\n")
-        f.write(f"  数据形状: {df.shape}\n")
-        f.write(f"  时间范围: {df.index[0]} 到 {df.index[-1]}\n\n")
+        f.write(f"  训练时间范围: {train_df.index[0]} 到 {train_df.index[-1]}\n")
+        f.write(f"  验证时间范围: {val_df.index[0]} 到 {val_df.index[-1]}\n\n")
         f.write("最终指标:\n")
-        f.write(f"  最佳验证损失: {min(history['val_loss']):.4f}\n")
-        f.write(f"  测试损失: {metrics['test_loss']:.4f}\n\n")
+        f.write(f"  最佳验证损失: {min(history['val_loss']):.4f}\n\n")
         f.write("模型配置:\n")
         for key, value in config['ts2vec'].items():
             f.write(f"  {key}: {value}\n")
