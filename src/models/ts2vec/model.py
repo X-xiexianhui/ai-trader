@@ -70,7 +70,7 @@ class DilatedConvEncoder(nn.Module):
                 hidden_dim,
                 kernel_size=kernel_size,
                 dilation=dilation,
-                padding=(kernel_size - 1) * dilation // 2  # 保持序列长度
+                padding='same'  # 自动保持序列长度
             )
             
             # 层归一化
@@ -190,7 +190,7 @@ class NTXentLoss(nn.Module):
                 z_i: torch.Tensor,
                 z_j: torch.Tensor) -> torch.Tensor:
         """
-        计算对比损失
+        计算对比损失（实例级对比学习）
         
         Args:
             z_i: 第一个视图的embedding [batch, seq_len, dim]
@@ -201,21 +201,22 @@ class NTXentLoss(nn.Module):
         """
         batch_size, seq_len, dim = z_i.shape
         
-        # 展平为 [batch*seq_len, dim]
-        z_i = z_i.reshape(-1, dim)
-        z_j = z_j.reshape(-1, dim)
+        # 对时间维度取平均，得到实例级表示
+        # 这样每个样本由整个序列表示，而不是单个时间步
+        z_i = z_i.mean(dim=1)  # [batch, dim]
+        z_j = z_j.mean(dim=1)  # [batch, dim]
         
         # 拼接正样本对
-        z = torch.cat([z_i, z_j], dim=0)  # [2*batch*seq_len, dim]
+        z = torch.cat([z_i, z_j], dim=0)  # [2*batch, dim]
         
         # 计算余弦相似度矩阵
-        sim_matrix = torch.mm(z, z.t()) / self.temperature  # [2N, 2N]
+        sim_matrix = torch.mm(z, z.t()) / self.temperature  # [2*batch, 2*batch]
         
         # 创建正样本mask
-        N = z_i.shape[0]
+        N = batch_size
         mask = torch.eye(2 * N, dtype=torch.bool, device=z.device)
         
-        # 正样本对的索引
+        # 正样本对的索引：z_i[i] 和 z_j[i] 是正样本对
         pos_mask = torch.zeros(2 * N, 2 * N, dtype=torch.bool, device=z.device)
         pos_mask[:N, N:] = torch.eye(N, dtype=torch.bool, device=z.device)
         pos_mask[N:, :N] = torch.eye(N, dtype=torch.bool, device=z.device)
@@ -361,9 +362,19 @@ class TS2VecModel(nn.Module):
         logger.info(f"TS2Vec模型已保存: {filepath}")
     
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> 'TS2VecModel':
-        """加载模型"""
-        checkpoint = torch.load(filepath, map_location='cpu')
+    def load(cls, filepath: str, device: str = 'cpu', **kwargs) -> 'TS2VecModel':
+        """
+        加载模型
+        
+        Args:
+            filepath: 模型文件路径
+            device: 目标设备 ('cpu', 'cuda', 'cuda:0' 等)
+            **kwargs: 其他模型配置参数
+            
+        Returns:
+            加载的模型实例
+        """
+        checkpoint = torch.load(filepath, map_location=device)
         
         # 合并配置
         config = checkpoint.get('config', {})
@@ -372,7 +383,8 @@ class TS2VecModel(nn.Module):
         # 创建模型
         model = cls(**config)
         model.load_state_dict(checkpoint['model_state_dict'])
+        model = model.to(device)
         
-        logger.info(f"TS2Vec模型已加载: {filepath}")
+        logger.info(f"TS2Vec模型已加载到 {device}: {filepath}")
         
         return model

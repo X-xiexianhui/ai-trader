@@ -38,7 +38,7 @@ class SlidingWindowGenerator:
         self.window_length = window_length
         self.stride = stride
         
-    def generate_windows(self, 
+    def generate_windows(self,
                         data: np.ndarray,
                         normalize_per_window: bool = True) -> np.ndarray:
         """
@@ -51,6 +51,12 @@ class SlidingWindowGenerator:
         Returns:
             窗口数组 [num_windows, window_length, D]
         """
+        # 维度检查和转换
+        if data.ndim == 1:
+            data = data.reshape(-1, 1)
+        elif data.ndim != 2:
+            raise ValueError(f"数据必须是1D或2D数组，当前维度: {data.ndim}")
+        
         if len(data) < self.window_length:
             raise ValueError(f"数据长度{len(data)}小于窗口长度{self.window_length}")
         
@@ -67,7 +73,8 @@ class SlidingWindowGenerator:
             if normalize_per_window:
                 mean = window.mean(axis=0, keepdims=True)
                 std = window.std(axis=0, keepdims=True)
-                std = np.where(std == 0, 1.0, std)  # 避免除零
+                # 改进的除零保护：使用小值而不是1.0
+                std = np.maximum(std, 1e-8)
                 window = (window - mean) / std
             
             windows.append(window)
@@ -131,7 +138,7 @@ class TimeSeriesAugmentation:
         Args:
             x: 输入窗口 [T, D]
             masking_ratio: 遮蔽比例（0.1-0.3）
-            mask_value: 遮蔽值（0或均值）
+            mask_value: 遮蔽值（0或'mean'）
             
         Returns:
             增强后的窗口
@@ -139,17 +146,25 @@ class TimeSeriesAugmentation:
         x_aug = x.copy()
         T = len(x)
         
+        # 验证masking_ratio
+        if not 0 < masking_ratio < 1:
+            raise ValueError(f"masking_ratio必须在(0,1)之间: {masking_ratio}")
+        
         # 计算要遮蔽的时间步数量
         num_mask = int(T * masking_ratio)
+        if num_mask == 0:
+            return x_aug
         
         # 随机选择要遮蔽的时间步
         mask_indices = np.random.choice(T, size=num_mask, replace=False)
         
-        # 应用遮蔽
-        if mask_value == 'mean':
+        # 改进的mask_value处理
+        if isinstance(mask_value, str) and mask_value == 'mean':
             x_aug[mask_indices] = x.mean(axis=0)
-        else:
+        elif isinstance(mask_value, (int, float)):
             x_aug[mask_indices] = mask_value
+        else:
+            raise ValueError(f"mask_value必须是数值或'mean'，当前: {mask_value}")
         
         return x_aug
     
@@ -170,9 +185,10 @@ class TimeSeriesAugmentation:
         """
         T, D = x.shape
         
-        # 生成扭曲后的长度
+        # 限制warp_ratio范围，防止过度扭曲
+        warp_ratio = min(abs(warp_ratio), 0.2)
         warp_factor = 1.0 + np.random.uniform(-warp_ratio, warp_ratio)
-        new_T = int(T * warp_factor)
+        new_T = max(int(T * warp_factor), T // 2)  # 至少保留一半长度
         
         # 使用插值进行时间扭曲
         x_aug = np.zeros((T, D))
@@ -183,15 +199,23 @@ class TimeSeriesAugmentation:
             # 新时间点
             new_indices = np.linspace(0, T-1, new_T)
             
-            # 插值
-            f = interpolate.interp1d(old_indices, x[:, d], kind='linear', 
-                                    fill_value='extrapolate')
+            # 使用边界值填充而不是外推，防止产生不合理的值
+            f = interpolate.interp1d(
+                old_indices, x[:, d],
+                kind='linear',
+                bounds_error=False,
+                fill_value=(x[0, d], x[-1, d])
+            )
             warped = f(new_indices)
             
             # 重采样回原始长度
             resample_indices = np.linspace(0, new_T-1, T)
-            f2 = interpolate.interp1d(np.arange(new_T), warped, kind='linear',
-                                     fill_value='extrapolate')
+            f2 = interpolate.interp1d(
+                np.arange(new_T), warped,
+                kind='linear',
+                bounds_error=False,
+                fill_value=(warped[0], warped[-1])
+            )
             x_aug[:, d] = f2(resample_indices)
         
         return x_aug
@@ -211,6 +235,12 @@ class TimeSeriesAugmentation:
         Returns:
             增强后的窗口
         """
+        # 验证scale_range
+        if scale_range[0] >= scale_range[1]:
+            raise ValueError(f"scale_range[0]必须小于scale_range[1]: {scale_range}")
+        if scale_range[0] <= 0:
+            raise ValueError(f"scale_range必须为正值: {scale_range}")
+        
         scale_factor = np.random.uniform(scale_range[0], scale_range[1])
         x_aug = x * scale_factor
         
