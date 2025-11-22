@@ -75,7 +75,8 @@ class IBHistoricalDataDownloader:
         bar_size: str = '5m',
         what_to_show: str = 'TRADES',
         use_rth: bool = False,
-        format_date: int = 1
+        format_date: int = 1,
+        target_tz: str = None
     ) -> Optional[pd.DataFrame]:
         """
         下载历史数据
@@ -83,7 +84,7 @@ class IBHistoricalDataDownloader:
         Args:
             contract: 合约对象
             end_datetime: 结束时间，None表示当前时间（连续期货合约必须为None）
-            duration: 持续时间 (如 '1 D', '2 W', '1 M', '1 Y')
+            duration: 持续时间 (如 '1 D', '2 W', '1 M', '10 Y')
             bar_size: K线周期 (使用BAR_SIZE_MAP中的键)
             what_to_show: 数据类型
             use_rth: 是否只使用常规交易时间 (Regular Trading Hours)
@@ -129,7 +130,7 @@ class IBHistoricalDataDownloader:
                 return None
             
             # 转换为DataFrame
-            df = self._bars_to_dataframe(bars)
+            df = self._bars_to_dataframe(bars, target_tz=target_tz)
             
             logger.info(f"成功下载 {len(df)} 条历史数据")
             return df
@@ -145,13 +146,14 @@ class IBHistoricalDataDownloader:
         end_date: datetime,
         bar_size: str = '5m',
         what_to_show: str = 'TRADES',
-        use_rth: bool = False
+        use_rth: bool = False,
+        target_tz: str = None
     ) -> Optional[pd.DataFrame]:
         """
         下载指定日期范围的历史数据
-        由于IB API限制，可能需要分段下载
+        智能处理超长期数据下载，支持最多68年
         
-        注意：对于连续期货合约(CONTFUT)，只能下载从当前时间往回的数据，
+        注意：对于连续期货合约(CONTFUT)，只能从当前时间往回下载，
         end_date参数会被忽略，使用当前时间。
         
         Args:
@@ -176,39 +178,94 @@ class IBHistoricalDataDownloader:
                 
                 # 计算需要下载的天数
                 total_days = (datetime.now() - start_date).days
+                logger.info(f"总天数: {total_days} 天 ({total_days/365:.1f} 年)")
                 
-                # 根据bar_size确定每次请求的最大天数
-                max_days_per_request = self._get_max_days_per_request(bar_size)
+                # 对于连续期货，IB实际限制较严格，需要分段下载
+                # 每次最多下载90天（约3个月）
+                max_days = 90
                 
-                # 计算需要的duration
-                if total_days <= max_days_per_request:
-                    duration = f"{total_days} D"
+                if total_days <= max_days:
+                    # 单次请求即可
+                    duration = self._calculate_optimal_duration(total_days)
+                    logger.info(f"单次请求: duration={duration}")
+                    
+                    df = self.download_historical_data(
+                        contract=contract,
+                        end_datetime=None,
+                        duration=duration,
+                        bar_size=bar_size,
+                        what_to_show=what_to_show,
+                        use_rth=use_rth,
+                        target_tz=target_tz
+                    )
                 else:
-                    # 如果超过限制，使用最大值
-                    duration = f"{max_days_per_request} D"
-                    logger.warning(f"请求天数({total_days})超过限制({max_days_per_request})，"
-                                 f"将只下载最近{max_days_per_request}天的数据")
-                
-                # 下载数据（end_datetime会被自动设为空字符串）
-                df = self.download_historical_data(
-                    contract=contract,
-                    end_datetime=None,  # 连续期货必须为None
-                    duration=duration,
-                    bar_size=bar_size,
-                    what_to_show=what_to_show,
-                    use_rth=use_rth
-                )
+                    # 分段下载
+                    logger.info(f"需要分段下载: 每段{max_days}天")
+                    all_data = []
+                    years_needed = (total_days // 365) + 1
+                    
+                    for year in range(years_needed):
+                        logger.info(f"\n[年份 {year + 1}/{years_needed}] 下载第{year + 1}年的数据")
+                        
+                        # 计算这一段的天数
+                        remaining_days = total_days - (year * max_days)
+                        days_this_segment = min(max_days, remaining_days)
+                        
+                        if days_this_segment <= 0:
+                            break
+                        
+                        duration = self._calculate_optimal_duration(days_this_segment)
+                        logger.info(f"Duration: {duration}")
+                        
+                        # 注意：连续期货只能用空字符串作为end_datetime
+                        # 但我们无法指定历史的结束时间，所以只能下载最近的数据
+                        # 这是连续期货的限制
+                        if year == 0:
+                            # 第一段：从现在往回
+                            df_segment = self.download_historical_data(
+                                contract=contract,
+                                end_datetime=None,
+                                duration=duration,
+                                bar_size=bar_size,
+                                what_to_show=what_to_show,
+                                use_rth=use_rth,
+                                target_tz=target_tz
+                            )
+                        else:
+                            # 后续段：连续期货无法指定历史结束时间
+                            # 这是IB API的限制
+                            logger.warning(f"连续期货合约无法下载{year}年前的历史数据")
+                            logger.warning("建议使用具体合约方式下载长期历史数据")
+                            break
+                        
+                        if df_segment is not None and not df_segment.empty:
+                            all_data.append(df_segment)
+                            logger.info(f"[年份 {year + 1}] 获取 {len(df_segment)} 条记录")
+                        
+                        # 避免请求过快
+                        if year < years_needed - 1:
+                            time.sleep(2)
+                    
+                    if not all_data:
+                        logger.warning("未获取到任何历史数据")
+                        return None
+                    
+                    # 合并所有数据
+                    df = pd.concat(all_data, ignore_index=True)
+                    df = df.drop_duplicates(subset=['date'])
+                    df = df.sort_values('date').reset_index(drop=True)
                 
                 if df is None or df.empty:
                     logger.warning("未获取到任何历史数据")
                     return None
                 
-                # 过滤到指定开始日期（确保start_date没有时区信息）
+                # 过滤到指定开始日期
                 if start_date.tzinfo is not None:
                     start_date = start_date.replace(tzinfo=None)
                 df = df[df['date'] >= start_date]
                 
                 logger.info(f"成功下载连续期货历史数据: {len(df)} 条记录")
+                logger.info(f"时间范围: {df['date'].min()} 到 {df['date'].max()}")
                 return df
             
             else:
@@ -222,7 +279,13 @@ class IBHistoricalDataDownloader:
                 while current_end > start_date:
                     # 计算本次请求的持续时间
                     days_to_request = min(max_days_per_request, (current_end - start_date).days)
-                    duration = f"{days_to_request} D"
+                    
+                    # 确保至少请求1天的数据
+                    if days_to_request <= 0:
+                        logger.warning(f"计算的天数无效: {days_to_request}，跳过")
+                        break
+                    
+                    duration = self._calculate_optimal_duration(days_to_request)
                     
                     logger.info(f"下载数据段: 结束于 {current_end}, 持续 {duration}")
                     
@@ -233,7 +296,8 @@ class IBHistoricalDataDownloader:
                         duration=duration,
                         bar_size=bar_size,
                         what_to_show=what_to_show,
-                        use_rth=use_rth
+                        use_rth=use_rth,
+                        target_tz=target_tz
                     )
                     
                     if df is not None and not df.empty:
@@ -274,12 +338,57 @@ class IBHistoricalDataDownloader:
             logger.error(f"下载历史数据范围失败: {e}")
             return None
     
-    def _bars_to_dataframe(self, bars: BarDataList) -> pd.DataFrame:
+    def _calculate_optimal_duration(self, total_days: int) -> str:
+        """
+        根据天数智能选择最优的duration字符串
+        基于IB API支持的duration单位：S(秒), D(天), W(周), M(月), Y(年)
+        
+        根据IB API文档，5分钟K线支持：
+        - Max Second Duration: 86400 S
+        - Max Day Duration: 365 D
+        - Max Week Duration: 52 W
+        - Max Month Duration: 12 M
+        - Max Year Duration: 68 Y
+        
+        Args:
+            total_days: 总天数
+        
+        Returns:
+            str: 最优的duration字符串 (如 "10 Y", "6 M", "30 D")
+        """
+        # 优先使用更大的单位以提高效率
+        years = total_days // 365
+        if years > 0 and years <= 68:  # 最多68年
+            return f"{years} Y"
+        
+        # 如果超过68年，使用68年
+        if total_days > 365 * 68:
+            logger.warning(f"请求天数({total_days})超过最大限制(68年)，将使用68年")
+            return "68 Y"
+        
+        # 对于不足1年的，使用月/周/天
+        months = total_days // 30
+        if months > 0 and months <= 12:  # 最多12个月
+            return f"{months} M"
+        
+        weeks = total_days // 7
+        if weeks > 0 and weeks <= 52:  # 最多52周
+            return f"{weeks} W"
+        
+        # 默认使用天数
+        if total_days <= 365:
+            return f"{total_days} D"
+        
+        # 兜底：使用365天
+        return "365 D"
+    
+    def _bars_to_dataframe(self, bars: BarDataList, target_tz: str = None) -> pd.DataFrame:
         """
         将IB的BarDataList转换为DataFrame
         
         Args:
             bars: IB返回的K线数据
+            target_tz: 目标时区（如 'US/Eastern'），None 则保持原时区
         
         Returns:
             pd.DataFrame: 转换后的数据
@@ -299,19 +408,28 @@ class IBHistoricalDataDownloader:
         
         df = pd.DataFrame(data)
         
-        # 确保date列是datetime类型，并移除时区信息以便比较
+        # 确保date列是datetime类型
         if not df.empty:
             df['date'] = pd.to_datetime(df['date'])
-            # 如果有时区信息，转换为UTC后移除时区
-            if df['date'].dt.tz is not None:
-                df['date'] = df['date'].dt.tz_convert('UTC').dt.tz_localize(None)
+            
+            # 如果指定了目标时区，进行转换
+            if target_tz and df['date'].dt.tz is not None:
+                import pytz
+                df['date'] = df['date'].dt.tz_convert(target_tz).dt.tz_localize(None)
+            elif df['date'].dt.tz is not None:
+                # 如果没有指定目标时区，移除时区信息
+                df['date'] = df['date'].dt.tz_localize(None)
         
         return df
     
     def _get_max_days_per_request(self, bar_size: str) -> int:
         """
         根据K线周期确定每次请求的最大天数
-        IB API对不同周期有不同的限制
+        基于IB API官方文档的限制
+        
+        参考：https://interactivebrokers.github.io/tws-api/historical_limitations.html
+        
+        对于5分钟K线，Max Year Duration = 68 Y，因此实际上可以一次请求68年的数据
         
         Args:
             bar_size: K线周期
@@ -319,32 +437,33 @@ class IBHistoricalDataDownloader:
         Returns:
             int: 最大天数
         """
-        # IB API的限制（近似值）
+        # IB API的限制（基于官方文档）
+        # 大多数bar size支持68年（约24820天）
         limits = {
-            '1s': 1,
-            '5s': 1,
-            '10s': 1,
-            '15s': 1,
-            '30s': 1,
-            '1m': 7,
-            '2m': 7,
-            '3m': 7,
-            '5m': 30,
-            '10m': 30,
-            '15m': 30,
-            '20m': 30,
-            '30m': 30,
-            '1h': 365,
-            '2h': 365,
-            '3h': 365,
-            '4h': 365,
-            '8h': 365,
-            '1d': 365,
-            '1w': 365 * 2,
-            '1M': 365 * 5
+            '1s': 1,      # Max: 2000 S (约0.5天)
+            '5s': 365 * 68,    # Max: 68 Y
+            '10s': 365 * 68,   # Max: 68 Y
+            '15s': 365 * 68,   # Max: 68 Y
+            '30s': 365 * 68,   # Max: 68 Y
+            '1m': 365 * 68,    # Max: 68 Y
+            '2m': 365 * 68,    # Max: 68 Y
+            '3m': 365 * 68,    # Max: 68 Y
+            '5m': 365 * 68,    # Max: 68 Y
+            '10m': 365 * 68,   # Max: 68 Y
+            '15m': 365 * 68,   # Max: 68 Y
+            '20m': 365 * 68,   # Max: 68 Y
+            '30m': 365 * 68,   # Max: 68 Y
+            '1h': 365 * 68,    # Max: 68 Y
+            '2h': 365 * 68,    # Max: 68 Y
+            '3h': 365 * 68,    # Max: 68 Y
+            '4h': 365 * 68,    # Max: 68 Y
+            '8h': 365 * 68,    # Max: 68 Y
+            '1d': 365 * 68,    # Max: 68 Y
+            '1w': 365 * 68,    # Max: 68 Y
+            '1M': 365 * 68     # Max: 68 Y
         }
         
-        return limits.get(bar_size, 30)
+        return limits.get(bar_size, 365 * 68)
     
     def download_historical_data_streaming(
         self,
@@ -425,7 +544,7 @@ class IBHistoricalDataDownloader:
                 if days_to_request <= 0:
                     break
                 
-                duration = f"{days_to_request} D"
+                duration = self._calculate_optimal_duration(days_to_request)
                 
                 logger.info(f"[块 {chunk_count}] 下载数据: 结束于 {current_end}, 持续 {duration}")
                 
