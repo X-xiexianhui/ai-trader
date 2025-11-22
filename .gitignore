@@ -74,6 +74,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+!data/processed/MES_cleaned_5m.csv
 data/cache/*
 !data/cache/.gitkeep
 models/ts2vec/*
