@@ -7,6 +7,7 @@
 - 特征重要性分析 (6.2) - 在模型训练后评估
 - 过拟合检测 (6.3)
 - 市场状态泛化 (6.4)
+- SHAP值分析 (6.5) - 模型可解释性分析
 
 注意: 特征验证(1.4)已移至src/features模块，在特征工程阶段使用
 """
@@ -36,6 +37,11 @@ from .market_state import (
     StateSpecificEvaluator
 )
 
+# SHAP值分析 (模块6.5)
+from .shap_analysis import (
+    SHAPAnalyzer
+)
+
 __all__ = [
     # Walk-forward验证
     'TimeWindowGenerator',
@@ -53,4 +59,7 @@ __all__ = [
     # 市场状态泛化
     'MarketStateIdentifier',
     'StateSpecificEvaluator',
+    
+    # SHAP值分析
+    'SHAPAnalyzer',
 ]

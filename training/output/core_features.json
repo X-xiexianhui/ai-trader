@@ -1,0 +1,28 @@
+{
+  "total_features": 20,
+  "features_to_remove": [
+    "FVG",
+    "sin_tod",
+    "volume_zscore",
+    "cos_tod",
+    "vol_20",
+    "dist_to_HH20",
+    "upper_shadow_ratio",
+    "lower_shadow_ratio",
+    "dist_to_LL20",
+    "volume"
+  ],
+  "core_features": [
+    "EMA20",
+    "ret_1",
+    "parkinson_vol",
+    "ret_5",
+    "ATR14",
+    "ret_20",
+    "OBV_slope_20",
+    "pos_in_range_20",
+    "stoch",
+    "volume_change_1"
+  ],
+  "core_features_count": 10
+}

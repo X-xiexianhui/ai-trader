@@ -1,10 +1,10 @@
 """
-特征计算模块 - 计算23维手工特征
+特征计算模块 - 计算20维手工特征
 
-本模块实现了完整的23维手工特征计算，包括：
-1. 价格与收益特征（5维）
+本模块实现了完整的20维手工特征计算，包括：
+1. 价格与收益特征（3维）- 已删除price_slope_20和C_div_MA20
 2. 波动率特征（3维）- 已删除BB_width和range_20以消除共线性
-3. 技术指标特征（3维）- 已删除VWAP以消除与EMA20的完全共线性
+3. 技术指标特征（2维）- 已删除VWAP和MACD
 4. 成交量特征（4维）
 5. K线形态特征（6维）- 已删除body_ratio以消除完全共线性
 6. 时间周期特征（2维）
@@ -33,12 +33,12 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 class FeatureCalculator:
     """
-    特征计算器 - 计算23维手工特征
+    特征计算器 - 计算20维手工特征
     
     特征组成：
-    1. 价格与收益特征（5维）
+    1. 价格与收益特征（3维）- 已删除price_slope_20和C_div_MA20
     2. 波动率特征（3维）- 已删除BB_width和range_20
-    3. 技术指标特征（3维）- 已删除VWAP
+    3. 技术指标特征（2维）- 已删除VWAP和MACD
     4. 成交量特征（4维）
     5. K线形态特征（6维）- 已删除body_ratio
     6. 时间周期特征（2维）
@@ -49,6 +49,9 @@ class FeatureCalculator:
     - BB_width已被删除，因为它与vol_20完全相关（ρ=1.0），VIF=inf
     - VWAP已被删除，因为它与EMA20几乎完全相关（ρ=0.998），VIF=774.92
     - range_20已被删除，因为它与vol_20高度相关（ρ=0.939），VIF=739.70
+    - price_slope_20已被删除，因为计算复杂且信息量有限
+    - C_div_MA20已被删除，因为与EMA20高度相关
+    - MACD已被删除，因为与收益率特征高度相关
     """
     
     def __init__(self):
@@ -56,7 +59,7 @@ class FeatureCalculator:
         
     def calculate_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        计算所有23维特征
+        计算所有20维特征
         
         Args:
             df: 清洗后的OHLC DataFrame
@@ -68,13 +71,13 @@ class FeatureCalculator:
         
         df = df.copy()
         
-        # 1. 价格与收益特征（5维）
+        # 1. 价格与收益特征（3维）- 已删除price_slope_20和C_div_MA20
         df = self.calculate_price_return_features(df)
         
         # 2. 波动率特征（3维）- 已删除BB_width和range_20
         df = self.calculate_volatility_features(df)
         
-        # 3. 技术指标特征（3维）- 已删除VWAP
+        # 3. 技术指标特征（2维）- 已删除VWAP和MACD
         df = self.calculate_technical_indicators(df)
         
         # 4. 成交量特征（4维）
@@ -95,14 +98,12 @@ class FeatureCalculator:
     
     def calculate_price_return_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        任务1.2.1: 计算价格与收益特征（5维）
+        任务1.2.1: 计算价格与收益特征（3维）
         
         特征说明：
         1. ret_1: 1周期对数收益率 - log(close[t] / close[t-1])
         2. ret_5: 5周期对数收益率 - log(close[t] / close[t-5])
         3. ret_20: 20周期对数收益率 - log(close[t] / close[t-20])
-        4. price_slope_20: 20周期价格线性回归斜率
-        5. C_div_MA20: 收盘价相对20周期均线的比值
         
         Args:
             df: 包含OHLC数据的DataFrame
@@ -137,30 +138,8 @@ class FeatureCalculator:
             df['ret_20'] = np.log(df['Close'] / close_shifted_20)
         df['ret_20'] = df['ret_20'].replace([np.inf, -np.inf], np.nan)
         
-        # 4. price_slope_20: 20周期价格线性回归斜率
-        # 使用scipy.stats.linregress计算斜率
-        def calculate_slope(x):
-            """计算线性回归斜率"""
-            if len(x) < 20 or np.isnan(x).any():
-                return np.nan
-            try:
-                slope, _, _, _, _ = stats.linregress(range(len(x)), x)
-                return slope
-            except:
-                return np.nan
-        
-        df['price_slope_20'] = df['Close'].rolling(window=20, min_periods=20).apply(
-            calculate_slope, raw=True
-        )
-        
-        # 5. C_div_MA20: 收盘价除以20周期均线
-        ma20 = df['Close'].rolling(window=20, min_periods=20).mean()
-        with np.errstate(divide='ignore', invalid='ignore'):
-            df['C_div_MA20'] = df['Close'] / ma20
-        df['C_div_MA20'] = df['C_div_MA20'].replace([np.inf, -np.inf], np.nan)
-        
         # 记录特征名称
-        self.feature_names.extend(['ret_1', 'ret_5', 'ret_20', 'price_slope_20', 'C_div_MA20'])
+        self.feature_names.extend(['ret_1', 'ret_5', 'ret_20'])
         
         logger.debug(f"价格与收益特征计算完成: {len(df)}行数据")
         
@@ -230,14 +209,15 @@ class FeatureCalculator:
     
     def calculate_technical_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        任务1.2.3: 计算技术指标特征（3维）
+        任务1.2.3: 计算技术指标特征（2维）
         
         特征说明：
         1. EMA20: 20周期指数移动平均
         2. stoch: 随机指标的%K值 - Stochastic(9, 3, 3)
-        3. MACD: MACD指标的MACD线 - MACD(12, 26, 9)
         
-        注意：VWAP已被删除，因为它与EMA20几乎完全相关（ρ=0.998），VIF=774.92
+        注意：
+        - VWAP已被删除，因为它与EMA20几乎完全相关（ρ=0.998），VIF=774.92
+        - MACD已被删除，因为与收益率特征高度相关
         
         Args:
             df: 包含OHLC和Volume数据的DataFrame
@@ -262,15 +242,8 @@ class FeatureCalculator:
         )
         df['stoch'] = stoch_indicator.stoch()
         
-        # 3. MACD: MACD线
-        # ta库的MACD
-        macd_indicator = trend.MACD(
-            close=df['Close'], window_slow=26, window_fast=12, window_sign=9
-        )
-        df['MACD'] = macd_indicator.macd()
-        
-        # 记录特征名称（已删除VWAP）
-        self.feature_names.extend(['EMA20', 'stoch', 'MACD'])
+        # 记录特征名称（已删除VWAP和MACD）
+        self.feature_names.extend(['EMA20', 'stoch'])
         
         logger.debug(f"技术指标特征计算完成: {len(df)}行数据")
         
@@ -555,9 +528,9 @@ class FeatureCalculator:
     def get_feature_groups(self) -> Dict[str, list]:
         """获取特征分组"""
         return {
-            'price_return': ['ret_1', 'ret_5', 'ret_20', 'price_slope_20', 'C_div_MA20'],
+            'price_return': ['ret_1', 'ret_5', 'ret_20'],  # 已删除price_slope_20和C_div_MA20
             'volatility': ['ATR14', 'vol_20', 'parkinson_vol'],  # 已删除BB_width和range_20
-            'technical': ['EMA20', 'stoch', 'MACD'],  # 已删除VWAP
+            'technical': ['EMA20', 'stoch'],  # 已删除VWAP和MACD
             'volume': ['volume', 'volume_zscore', 'volume_change_1', 'OBV_slope_20'],
             'candlestick': ['pos_in_range_20', 'dist_to_HH20', 'dist_to_LL20',
                           'upper_shadow_ratio', 'lower_shadow_ratio', 'FVG'],
